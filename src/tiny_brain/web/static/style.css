@@ -19,4 +19,8 @@
 .source-title{font-weight:600;color:var(--ink)}
 .source-meta{font-family:'DM Mono',monospace;font-size:11px;color:var(--muted)}
 .source-content{font-family:'DM Mono',monospace;font-size:12px;line-height:1.45;color:#45524b;white-space:pre-wrap;max-height:160px;overflow:auto;background:var(--panel);padding:6px 8px;border:1px solid var(--line);margin:0}
+.result-title-link{color:var(--ink);text-decoration:none}
+.result-title-link:hover{color:var(--coral);text-decoration:underline}
+.btn-action{font-family:'DM Mono',monospace;display:inline-flex;align-items:center;border-radius:2px;cursor:pointer}
+@media(max-width:800px){.note-layout{grid-template-columns:1fr !important}}
 

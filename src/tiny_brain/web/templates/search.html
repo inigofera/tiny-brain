@@ -1,1 +1,105 @@
-<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Search | Tiny Brain</title><link rel="stylesheet" href="/static/style.css"></head><body><header class="topbar"><a class="brand" href="/">TINY BRAIN</a><nav><a class="active" href="/ui/search">Search</a><a href="/ui/changes">Changes</a></nav></header><main class="shell compact"><p class="eyebrow">EVIDENCE INDEX</p><h1>Search the vault.</h1><form id="search-form" class="search-form"><input id="query" placeholder="Search exact terms or concepts" required><button>Search <span aria-hidden="true">↗</span></button></form><div id="results"></div></main><script>const form=document.querySelector('#search-form'),out=document.querySelector('#results');form.addEventListener('submit',async e=>{e.preventDefault();const q=document.querySelector('#query').value;const r=await fetch('/search',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({query:q})});const d=await r.json();out.innerHTML=d.results.map(x=>`<article class="result"><div><span class="citation">${x.citation_id}</span><strong>${escapeHtml(x.title)}</strong><small>${escapeHtml(x.path)} · ${escapeHtml(x.heading||'Note')}</small></div><p>${escapeHtml(x.content)}</p><em>${escapeHtml(x.relationship)}</em></article>`).join('')||'<p class="muted">No indexed evidence found.</p>';});function escapeHtml(v){return v.replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[c]));}</script></body></html>
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Search | Tiny Brain</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="/">TINY BRAIN</a>
+    <nav>
+      <a class="active" href="/ui/search">Search</a>
+      <a href="/ui/changes">Changes</a>
+      <span class="host">{{ host }}</span>
+    </nav>
+  </header>
+  <main class="shell compact">
+    <p class="eyebrow">EVIDENCE INDEX</p>
+    <h1>Search the vault.</h1>
+    <form id="search-form" class="search-form">
+      <input id="query" placeholder="Search exact terms or concepts" required>
+      <button id="search-btn" type="submit">Search <span aria-hidden="true">↗</span></button>
+    </form>
+    <div id="results"></div>
+  </main>
+<script>
+const form = document.querySelector('#search-form'),
+      queryInput = document.querySelector('#query'),
+      searchBtn = document.querySelector('#search-btn'),
+      out = document.querySelector('#results');
+
+function escapeHtml(v){ return String(v||'').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[c])); }
+
+async function executeSearch(q){
+  if(!q) return;
+  searchBtn.disabled = true;
+  searchBtn.innerHTML = 'Searching...';
+  out.innerHTML = '<p class="muted">Searching vault evidence...</p>';
+
+  try {
+    const r = await fetch('/search', {
+      method: 'POST',
+      headers: {'content-type': 'application/json'},
+      body: JSON.stringify({query: q})
+    });
+    const d = await r.json();
+    if(!r.ok) throw new Error(d.detail || 'Search query failed');
+
+    if(!d.results || !d.results.length){
+      out.innerHTML = '<p class="muted">No indexed evidence found for "' + escapeHtml(q) + '".</p>';
+      return;
+    }
+
+    out.innerHTML = d.results.map(x => {
+      const noteUrl = '/ui/notes/' + encodeURIComponent(x.path);
+      const obsidianUrl = 'obsidian://open?file=' + encodeURIComponent(x.path);
+
+      return `
+        <article class="result">
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:8px;">
+            <div>
+              <span class="citation">${escapeHtml(x.citation_id)}</span>
+              <a href="${noteUrl}" class="result-title-link"><strong>${escapeHtml(x.title)}</strong></a>
+              <small style="display:block;margin-top:2px;">
+                <a href="${noteUrl}" style="color:var(--muted);text-decoration:none;">${escapeHtml(x.path)}</a>
+                ${x.heading ? ' · <span style="color:var(--ink);">' + escapeHtml(x.heading) + '</span>' : ''}
+              </small>
+            </div>
+            <div style="display:flex;gap:6px;align-items:center;">
+              <a href="${noteUrl}" class="btn-action quiet" style="font-size:11px;padding:4px 10px;border:1px solid var(--line);text-decoration:none;color:var(--ink);background:var(--paper);">Read Note</a>
+              <a href="${obsidianUrl}" class="btn-action" style="font-size:11px;padding:4px 10px;background:var(--ink);color:var(--paper);text-decoration:none;">Obsidian ↗</a>
+            </div>
+          </div>
+          <p style="margin-top:10px;">${escapeHtml(x.content)}</p>
+          <em>${escapeHtml(x.relationship)}</em>
+        </article>
+      `;
+    }).join('');
+  } catch(err){
+    out.innerHTML = '<p class="error">' + escapeHtml(err.message) + '</p>';
+  } finally {
+    searchBtn.disabled = false;
+    searchBtn.innerHTML = 'Search <span aria-hidden="true">↗</span>';
+  }
+}
+
+form.addEventListener('submit', e => {
+  e.preventDefault();
+  const q = queryInput.value.trim();
+  if(!q) return;
+  const newUrl = new URL(window.location);
+  newUrl.searchParams.set('q', q);
+  window.history.pushState({}, '', newUrl);
+  executeSearch(q);
+});
+
+// Check URL query on page load
+const initialQuery = new URLSearchParams(window.location.search).get('q');
+if(initialQuery){
+  queryInput.value = initialQuery;
+  executeSearch(initialQuery);
+}
+</script>
+</body>
+</html>

@@ -478,11 +478,46 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.get("/ui/search", response_class=HTMLResponse)
     async def search_page(request: Request):
-        return templates.TemplateResponse(request=request, name="search.html", context={"request": request})
+        return templates.TemplateResponse(request=request, name="search.html", context={"request": request, "host": settings.lan_host})
 
     @app.get("/ui/changes", response_class=HTMLResponse)
     async def changes_page(request: Request):
-        return templates.TemplateResponse(request=request, name="changes.html", context={"request": request})
+        return templates.TemplateResponse(request=request, name="changes.html", context={"request": request, "host": settings.lan_host})
+
+    @app.get("/ui/notes/{relative_path:path}", response_class=HTMLResponse)
+    async def note_page(request: Request, relative_path: str):
+        try:
+            path = resolve_vault_path(settings.vault_root, relative_path)
+        except UnsafePath as exc:
+            raise HTTPException(status_code=400, detail="unsafe note path") from exc
+        if not path.exists():
+            raise HTTPException(status_code=404, detail="note not found")
+        content = path.read_text(encoding="utf-8")
+        if len(content) > 2_000_000:
+            raise HTTPException(status_code=413, detail="note is too large")
+        with database.connect() as connection:
+            row = connection.execute("SELECT * FROM notes WHERE relative_path = ?", (relative_path,)).fetchone()
+            backlinks = connection.execute(
+                """SELECT DISTINCT s.relative_path FROM links l JOIN sections s ON s.section_id = l.source_section_id
+                   WHERE lower(l.target) IN (lower(?), lower(?))""",
+                (relative_path, relative_path.removesuffix(".md")),
+            ).fetchall()
+        tags = json.loads(row["tags_json"]) if row and row["tags_json"] else []
+        title = row["title"] if row else path.stem
+        obsidian_uri = f"obsidian://open?file={relative_path}"
+        return templates.TemplateResponse(
+            request=request,
+            name="note.html",
+            context={
+                "request": request,
+                "note": {"title": title, "path": relative_path, "metadata": dict(row) if row else None},
+                "content": content,
+                "tags": tags,
+                "backlinks": [item[0] for item in backlinks],
+                "obsidian_uri": obsidian_uri,
+                "host": settings.lan_host,
+            },
+        )
 
     return app
 

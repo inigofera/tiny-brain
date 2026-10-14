@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>{{ note.title }} | Tiny Brain</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="/">TINY BRAIN</a>
+    <nav>
+      <a class="active" href="/ui/search">Search</a>
+      <a href="/ui/changes">Changes</a>
+      <span class="host">{{ host }}</span>
+    </nav>
+  </header>
+  <main class="shell">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:14px;margin-bottom:24px;">
+      <div>
+        <p class="eyebrow">VAULT NOTE</p>
+        <h1 style="margin:8px 0 6px;">{{ note.title }}</h1>
+        <small style="color:var(--muted);font-family:'DM Mono',monospace;font-size:12px;">{{ note.path }}</small>
+      </div>
+      <div style="display:flex;gap:10px;margin-top:10px;flex-wrap:wrap;">
+        <a href="{{ obsidian_uri }}" class="btn-action" style="padding:0 14px;height:38px;background:var(--ink);color:var(--paper);text-decoration:none;font-size:12px;">Open in Obsidian ↗</a>
+        <a href="/ui/search" class="btn-action quiet" style="padding:0 14px;height:38px;border:1px solid var(--line);background:var(--panel);color:var(--ink);text-decoration:none;font-size:12px;">Back to Search</a>
+      </div>
+    </div>
+
+    {% if tags %}
+      <div style="margin-bottom:18px;display:flex;gap:6px;flex-wrap:wrap;">
+        {% for tag in tags %}
+          <span style="font-family:'DM Mono',monospace;font-size:11px;background:#e9eee4;padding:3px 8px;border-radius:2px;color:var(--ink);">#{{ tag }}</span>
+        {% endfor %}
+      </div>
+    {% endif %}
+
+    <div class="note-layout" style="display:grid;grid-template-columns:minmax(0,1fr) 280px;gap:24px;align-items:start;">
+      <article class="markdown" style="background:var(--panel);border:1px solid var(--line);padding:26px 30px;box-shadow:var(--shadow);">
+        <div id="rendered-content"></div>
+      </article>
+
+      <aside class="note-sidebar" style="display:grid;gap:16px;">
+        <div style="background:var(--panel);border:1px solid var(--line);padding:16px;box-shadow:0 4px 12px #25352a08;">
+          <strong style="font-family:'DM Mono',monospace;font-size:11px;display:block;margin-bottom:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--coral);">Metadata</strong>
+          <small style="display:block;color:var(--muted);font-family:'DM Mono',monospace;margin-bottom:6px;">Size: {{ note.metadata.byte_size if note.metadata else content|length }} bytes</small>
+          <small style="display:block;color:var(--muted);font-family:'DM Mono',monospace;">Index status: {{ note.metadata.index_status if note.metadata else 'indexed' }}</small>
+        </div>
+
+        <div style="background:var(--panel);border:1px solid var(--line);padding:16px;box-shadow:0 4px 12px #25352a08;">
+          <strong style="font-family:'DM Mono',monospace;font-size:11px;display:block;margin-bottom:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--coral);">Backlinks ({{ backlinks|length }})</strong>
+          {% if backlinks %}
+            <ul style="margin:0;padding-left:18px;font-family:'DM Mono',monospace;font-size:12px;line-height:1.7;">
+              {% for bl in backlinks %}
+                <li><a href="/ui/notes/{{ bl }}" style="color:var(--coral);text-decoration:none;">{{ bl }}</a></li>
+              {% endfor %}
+            </ul>
+          {% else %}
+            <p style="margin:0;color:var(--muted);font-size:12px;">No incoming links in the vault.</p>
+          {% endif %}
+        </div>
+      </aside>
+    </div>
+  </main>
+<script id="raw-note-data" type="text/plain">{{ content }}</script>
+<script>
+function escapeHtml(value){return String(value||'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[c]));}
+function renderInline(value){const code=[];let text=escapeHtml(value).replace(/`([^`\n]+)`/g,(_,item)=>{code.push(item);return `\u0000${code.length-1}\u0000`;});text=text.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g,'<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>').replace(/\*\*([^*\n]+)\*\*/g,'<strong>$1</strong>').replace(/__([^_\n]+)__/g,'<strong>$1</strong>').replace(/~~([^~\n]+)~~/g,'<del>$1</del>').replace(/\*([^*\n]+)\*/g,'<em>$1</em>').replace(/_([^_\n]+)_/g,'<em>$1</em>');return text.replace(/\u0000(\d+)\u0000/g,(_,index)=>`<code>${code[Number(index)]}</code>`);}
+function renderMarkdown(value){const lines=String(value||'').replace(/\r\n?/g,'\n').split('\n'),html=[];let paragraph=[],listType=null,listItems=[],codeLines=null,codeLanguage='';const flushParagraph=()=>{if(paragraph.length){html.push(`<p>${renderInline(paragraph.join('\n')).replace(/\n/g,'<br>')}</p>`);paragraph=[];}};const flushList=()=>{if(listType){html.push(`<${listType}>${listItems.map(item=>`<li>${renderInline(item)}</li>`).join('')}</${listType}>`);listType=null;listItems=[];}};const flushCode=()=>{if(codeLines!==null){const language=codeLanguage?` class="language-${escapeHtml(codeLanguage)}"`:'';html.push(`<pre><code${language}>${escapeHtml(codeLines.join('\n'))}</code></pre>`);codeLines=null;codeLanguage='';}};for(const line of lines){if(codeLines!==null){if(/^\s*```/.test(line)){flushCode();}else codeLines.push(line);continue;}const fence=line.match(/^\s*```\s*([\w+-]*)\s*$/);if(fence){flushParagraph();flushList();codeLines=[];codeLanguage=fence[1];continue;}if(!line.trim()){flushParagraph();flushList();continue;}const heading=line.match(/^\s*(#{1,6})\s+(.+?)\s*#*\s*$/);if(heading){flushParagraph();flushList();const level=heading[1].length;html.push(`<h${level}>${renderInline(heading[2])}</h${level}>`);continue;}const unordered=line.match(/^\s*[-*+]\s+(.+)$/);const ordered=line.match(/^\s*\d+[.)]\s+(.+)$/);if(unordered||ordered){flushParagraph();const type=unordered?'ul':'ol';if(listType!==type){flushList();listType=type;}listItems.push((unordered||ordered)[1]);continue;}if(/^\s*>/.test(line)){flushParagraph();flushList();html.push(`<blockquote>${renderInline(line.replace(/^\s*>\s?/,'') )}</blockquote>`);continue;}if(/^\s*(---+|\*\*\*+)\s*$/.test(line)){flushParagraph();flushList();html.push('<hr>');continue;}paragraph.push(line);}flushParagraph();flushList();flushCode();return html.join('');}
+
+const raw = document.getElementById('raw-note-data').textContent;
+document.getElementById('rendered-content').innerHTML = renderMarkdown(raw);
+</script>
+</body>
+</html>

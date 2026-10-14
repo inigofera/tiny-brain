@@ -280,3 +280,36 @@ def test_chat_session_persistence_and_new_session(tmp_path: Path):
     fresh_history = client.get("/chat/history").json()
     assert fresh_history["session_id"] == new_sess["session_id"]
     assert fresh_history["messages"] == []
+
+
+def test_note_inspection_page_and_search_integration(tmp_path: Path):
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    (vault / "Concept.md").write_text("# Concept\nImportant ideas [[Other]].\n", encoding="utf-8")
+    (vault / "Other.md").write_text("# Other\nBacklinks here.\n", encoding="utf-8")
+    settings = Settings(vault, tmp_path / "data", tmp_path / "data/db.sqlite", tmp_path / "models", "http://127.0.0.1:9/v1", "model", "embed", "none", 8192, 4, "tiny-brain.test", True, .9, True, "127.0.0.1", 8000)
+    app = create_app(settings)
+    app.state.indexer.full_scan()
+    client = TestClient(app)
+
+    # Note page exists and renders content, metadata, and Obsidian URI
+    note_resp = client.get("/ui/notes/Concept.md")
+    assert note_resp.status_code == 200
+    assert "Concept" in note_resp.text
+    assert "obsidian://open?file=Concept.md" in note_resp.text
+    assert "Important ideas" in note_resp.text
+
+    # Backlink is detected for Other.md
+    other_resp = client.get("/ui/notes/Other.md")
+    assert other_resp.status_code == 200
+    assert "Concept.md" in other_resp.text
+
+    # 404 for missing note and 400 for unsafe note
+    assert client.get("/ui/notes/NonExistent.md").status_code == 404
+    assert client.get("/ui/notes/../unsafe.md").status_code in {400, 404}
+
+    # Search page renders Obsidian links and query handling
+    search_page_resp = client.get("/ui/search")
+    assert search_page_resp.status_code == 200
+    assert "obsidian://" in search_page_resp.text
+    assert "Read Note" in search_page_resp.text
