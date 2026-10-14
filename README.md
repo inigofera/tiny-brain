@@ -101,16 +101,15 @@ python -m tiny_brain.main
 
 ## Deployment Outline
 
-1. **Host Discovery**: Inspect the target host (e.g. Intel NUC at `192.168.1.117`, user `inigo`); verify Docker, storage paths, firewall, and device permissions before provisioning.
-2. **Directory Structure**: Create `/srv/tiny-brain/{vault,data,models,staging,compose}` on the host with the target UID/GID (`TINY_BRAIN_PUID`, `TINY_BRAIN_PGID`).
-3. **Safe Vault Extraction**: Copy the vault archive to staging, validate with `scripts/inspect_vault.py`, reject unsafe paths, and extract with `scripts/import_vault.py`.
-4. **Git Initialization**: Initialize Git in the canonical vault using `scripts/init_vault_git.py`, configure the deployment author, and create the initial import commit before enabling writes.
-5. **Environment Configuration**: Copy `deployment/compose.env.example` to `/srv/tiny-brain/compose/.env`, verify volume paths, and pin the `llama.cpp` server image digest/release.
-6. **Chat Model Installation**: Place the verified `gemma-4-E2B-it-q4_k_m.gguf` in `/srv/tiny-brain/models/` and record its SHA-256 checksum in `model_metadata`.
-7. **Start Stack**: Launch Docker Compose (`docker compose up -d`), trust Caddy's internal CA on client devices (`https://tiny-brain.home.arpa`) or connect via LAN HTTP (`http://192.168.1.117/`), and run the initial vault index.
-8. **Syncthing Pairing**: Pair Syncthing separately. Keep its web GUI bound to localhost (`127.0.0.1:8384`); do not expose it through Caddy.
-9. **Benchmark & Verify**: Benchmark `gemma-4-E2B-it-q4_k_m.gguf` (`scripts/benchmark_model.py`) and the embedding runtimes (`scripts/benchmark_embeddings.py`) on representative notes before enabling automatic Inbox writes.
-10. **Backups**: Configure automated backups with `deployment/backup.sh` to produce independent vault, operational database, audit log, and Git bundle archives.
+1. **Directory Structure**: Create `/srv/tiny-brain/{vault,data,models,staging,compose}` on the host with the target UID/GID (`TINY_BRAIN_PUID`, `TINY_BRAIN_PGID`).
+2. **Safe Vault Extraction**: Copy the vault archive to staging, validate with `scripts/inspect_vault.py`, reject unsafe paths, and extract with `scripts/import_vault.py`.
+3. **Git Initialization**: Initialize Git in the canonical vault using `scripts/init_vault_git.py`, configure the deployment author, and create the initial import commit before enabling writes.
+4. **Environment Configuration**: Copy `deployment/compose.env.example` to `/srv/tiny-brain/compose/.env`, verify volume paths, and pin the `llama.cpp` server image digest/release.
+5. **Chat Model Installation**: Place the verified `gemma-4-E2B-it-q4_k_m.gguf` in `/srv/tiny-brain/models/` and record its SHA-256 checksum in `model_metadata`.
+6. **Start Stack**: Launch Docker Compose (`docker compose up -d`), trust Caddy's internal CA on client devices (`https://tiny-brain.home.arpa`) or connect via LAN HTTP (`http://192.168.1.117/`), and run the initial vault index.
+7. **Syncthing Pairing**: Pair Syncthing separately. Keep its web GUI bound to localhost (`127.0.0.1:8384`); do not expose it through Caddy.
+8. **Benchmark & Verify**: Benchmark `gemma-4-E2B-it-q4_k_m.gguf` (`scripts/benchmark_model.py`) and the embedding runtimes (`scripts/benchmark_embeddings.py`) on representative notes before enabling automatic Inbox writes.
+9. **Backups**: Configure automated backups with `deployment/backup.sh` to produce independent vault, operational database, audit log, and Git bundle archives.
 
 ---
 
