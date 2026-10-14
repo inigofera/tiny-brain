@@ -121,7 +121,7 @@ def benchmark_note_creation(app_base_url: str, prompt: str):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--app-url", default="http://192.168.1.117")
+    parser.add_argument("--app-url", default="http://127.0.0.1")
     parser.add_argument("--skip-note", action="store_true", help="Skip note creation test")
     parser.add_argument("--skip-chat", action="store_true", help="Skip chat test")
     args = parser.parse_args()
