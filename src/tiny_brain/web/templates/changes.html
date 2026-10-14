@@ -1,1 +1,160 @@
-<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Changes | Tiny Brain</title><link rel="stylesheet" href="/static/style.css"></head><body><header class="topbar"><a class="brand" href="/">TINY BRAIN</a><nav><a href="/ui/search">Search</a><a class="active" href="/ui/changes">Changes</a></nav></header><main class="shell compact"><p class="eyebrow">AUDITED MUTATIONS</p><h1>Review changes.</h1><p class="lede">Normal note edits wait here until you approve them.</p><div id="changes"></div></main><script>async function load(){const out=document.querySelector('#changes'),r=await fetch('/changes?state=pending'),items=await r.json();out.innerHTML=items.map(x=>`<article class="change"><div><span class="status">${x.state}</span><strong>${escapeHtml(x.target_path)}</strong><small>${escapeHtml(x.operation)} · ${new Date(x.created_at).toLocaleString()}</small></div><p>${escapeHtml(x.description)}<br><span class="muted">${escapeHtml(x.reason)}</span></p><div class="actions"><button onclick="act('${x.change_id}','approve')">Approve</button><button class="quiet" onclick="act('${x.change_id}','reject')">Reject</button></div></article>`).join('')||'<p class="muted">No pending changes.</p>';}async function act(id,action){await fetch('/changes/'+id+'/'+action,{method:'POST'});load();}function escapeHtml(v){return v.replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[c]));}load();</script></body></html>
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Changes | Tiny Brain</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="/">TINY BRAIN</a>
+    <nav>
+      <a href="/ui/search">Search</a>
+      <a class="active" href="/ui/changes">Changes</a>
+    </nav>
+  </header>
+  <main class="shell compact">
+    <p class="eyebrow">AUDITED MUTATIONS</p>
+    <h1>Review changes.</h1>
+    <p class="lede">Review proposed notes, inspect diffs, resolve conflicts, and revert past mutations.</p>
+    
+    <div class="filter-tabs">
+      <button type="button" class="filter-tab active" data-state="pending">Pending</button>
+      <button type="button" class="filter-tab" data-state="conflict">Conflicts</button>
+      <button type="button" class="filter-tab" data-state="committed">History (Committed)</button>
+      <button type="button" class="filter-tab" data-state="">All</button>
+    </div>
+
+    <div id="changes"></div>
+  </main>
+<script>
+let currentState = 'pending';
+
+function escapeHtml(v){return String(v||'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[c]));}
+
+function diffLineClass(line){
+  if(line.startsWith('+++')||line.startsWith('---'))return 'meta';
+  if(line.startsWith('@@'))return 'hunk';
+  if(line.startsWith('+'))return 'add';
+  if(line.startsWith('-'))return 'del';
+  return 'ctx';
+}
+
+function renderDiff(diff, truncated){
+  if(!diff || !diff.length){
+    return '<span class="diff-line ctx">No textual diff available.</span>';
+  }
+  const linesHtml = diff.map(line => `<span class="diff-line ${diffLineClass(line)}">${escapeHtml(line)}</span>`).join('');
+  const truncNotice = truncated ? '<small class="vault-note" style="display:block;padding:4px 12px;">Diff truncated.</small>' : '';
+  return linesHtml + truncNotice;
+}
+
+async function load(){
+  const out = document.querySelector('#changes');
+  out.innerHTML = '<p class="muted">Loading changes...</p>';
+  try{
+    const url = currentState ? `/changes?state=${encodeURIComponent(currentState)}` : '/changes';
+    const r = await fetch(url);
+    if(!r.ok) throw new Error('Failed to load changes');
+    const items = await r.json();
+    if(!items.length){
+      out.innerHTML = `<p class="muted">No ${currentState ? escapeHtml(currentState) : ''} changes found.</p>`;
+      return;
+    }
+    out.innerHTML = items.map(x => {
+      const isPending = x.state === 'pending';
+      const isConflict = x.state === 'conflict';
+      const isCommitted = x.state === 'committed';
+
+      let actionsHtml = '';
+      if(isPending){
+        actionsHtml = `
+          <div class="actions">
+            <button type="button" class="btn-approve" onclick="act('${x.change_id}','approve',this)">Approve</button>
+            <button type="button" class="quiet btn-reject" onclick="act('${x.change_id}','reject',this)">Reject</button>
+          </div>`;
+      } else if(isConflict){
+        actionsHtml = `
+          <div class="actions">
+            <button type="button" class="quiet btn-reject" onclick="act('${x.change_id}','reject',this)">Dismiss / Reject</button>
+          </div>`;
+      } else if(isCommitted){
+        actionsHtml = `
+          <div class="actions">
+            <button type="button" class="quiet btn-revert" onclick="act('${x.change_id}','revert',this)">Revert Change</button>
+          </div>`;
+      }
+
+      let conflictHtml = '';
+      if(x.conflict_data){
+        conflictHtml = `
+          <div class="conflict-box">
+            <strong>Merge Conflict Detected:</strong>
+            <div>${escapeHtml(x.conflict_data)}</div>
+          </div>`;
+      }
+
+      let commitInfo = '';
+      if(x.git_commit_id){
+        commitInfo = `<small style="display:block;margin-top:4px;color:var(--muted);font-family:'DM Mono',monospace;">Git commit: <code>${escapeHtml(x.git_commit_id.slice(0, 10))}</code></small>`;
+      }
+
+      return `
+        <article class="change" id="change-${escapeHtml(x.change_id)}">
+          <div>
+            <span class="status ${isConflict ? 'status-conflict' : (isCommitted ? 'status-committed' : '')}">${escapeHtml(x.state)}</span>
+            <strong>${escapeHtml(x.target_path)}</strong>
+            <small>${escapeHtml(x.operation)} · ${new Date(x.created_at).toLocaleString()}</small>
+          </div>
+          <p>${escapeHtml(x.description)}<br><span class="muted">${escapeHtml(x.reason)}</span></p>
+          ${commitInfo}
+          ${conflictHtml}
+          <details open style="margin: 12px 0;">
+            <summary style="cursor:pointer;font-family:'DM Mono',monospace;font-size:11px;text-transform:uppercase;color:var(--ink);">View Diff / Proposed Content</summary>
+            <pre class="diff">${renderDiff(x.diff, x.diff_truncated)}</pre>
+          </details>
+          ${actionsHtml}
+          <div class="change-status-msg" hidden></div>
+        </article>
+      `;
+    }).join('');
+  }catch(err){
+    out.innerHTML = `<p class="error">${escapeHtml(err.message)}</p>`;
+  }
+}
+
+async function act(id, action, btn){
+  const card = document.querySelector('#change-' + id);
+  const statusEl = card ? card.querySelector('.change-status-msg') : null;
+  if(statusEl){ statusEl.hidden = true; statusEl.textContent = ''; }
+  if(card){ card.querySelectorAll('button').forEach(b => b.disabled = true); }
+
+  try{
+    const r = await fetch('/changes/' + id + '/' + action, {method: 'POST'});
+    const data = await r.json().catch(() => ({}));
+    if(!r.ok){
+      throw new Error(data.detail || `Action '${action}' failed with status ${r.status}`);
+    }
+    load();
+  }catch(err){
+    if(statusEl){
+      statusEl.textContent = err.message;
+      statusEl.hidden = false;
+    }
+    if(card){ card.querySelectorAll('button').forEach(b => b.disabled = false); }
+  }
+}
+
+document.querySelectorAll('.filter-tab').forEach(tab => {
+  tab.addEventListener('click', () => {
+    document.querySelectorAll('.filter-tab').forEach(t => t.classList.remove('active'));
+    tab.classList.add('active');
+    currentState = tab.dataset.state;
+    load();
+  });
+});
+
+load();
+</script>
+</body>
+</html>

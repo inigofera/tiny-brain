@@ -304,7 +304,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 rows = connection.execute("SELECT * FROM change_proposals WHERE state = ? ORDER BY updated_at DESC LIMIT 100", (state,)).fetchall()
             else:
                 rows = connection.execute("SELECT * FROM change_proposals ORDER BY updated_at DESC LIMIT 100").fetchall()
-        return [dict(row) for row in rows]
+        result = []
+        for row in rows:
+            data = dict(row)
+            diff_lines, truncated = make_diff(row["base_content"] or "", row["proposed_content"], row["target_path"])
+            data["diff"] = diff_lines
+            data["diff_truncated"] = truncated
+            result.append(data)
+        return result
 
     @app.get("/vault-drafts")
     async def vault_drafts() -> list[dict[str, object]]:
@@ -317,7 +324,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             row = connection.execute("SELECT * FROM change_proposals WHERE change_id = ?", (change_id,)).fetchone()
         if not row:
             raise HTTPException(status_code=404, detail="change not found")
-        return dict(row)
+        data = dict(row)
+        diff_lines, truncated = make_diff(row["base_content"] or "", row["proposed_content"], row["target_path"])
+        data["diff"] = diff_lines
+        data["diff_truncated"] = truncated
+        return data
 
     @app.post("/changes")
     async def create_change(request: ProposalRequest) -> dict[str, str]:

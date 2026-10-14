@@ -158,3 +158,41 @@ def test_planned_query_finds_topic_note(tmp_path: Path):
     response = TestClient(app).post("/chat/stream", json={"message": "do we have anything written down about Essentialism? if so give me a quick summary", "thinking": False})
     assert response.status_code == 200
     assert "[SOURCE" in received["user_message"]
+
+
+def test_changes_endpoints_include_diff_and_conflict_support(tmp_path: Path):
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    (vault / "note.md").write_text("# Original\nOld content\n", encoding="utf-8")
+    settings = Settings(vault, tmp_path / "data", tmp_path / "data/db.sqlite", tmp_path / "models", "http://127.0.0.1:9/v1", "model", "embed", "none", 8192, 4, "tiny-brain.test", True, .9, True, "127.0.0.1", 8000)
+    app = create_app(settings)
+    client = TestClient(app)
+
+    # Create proposal to edit
+    resp = client.post("/changes", json={
+        "operation": "propose_edit",
+        "target_path": "note.md",
+        "proposed_content": "# Original\nUpdated content\n",
+        "description": "Update note",
+        "reason": "testing diff",
+    })
+    assert resp.status_code == 200
+    change_id = resp.json()["change_id"]
+
+    # Verify list /changes includes diff
+    changes = client.get("/changes?state=pending").json()
+    assert len(changes) == 1
+    assert "diff" in changes[0]
+    assert any("+Updated content" in line for line in changes[0]["diff"])
+    assert changes[0]["diff_truncated"] is False
+
+    # Verify single /changes/{id} includes diff
+    single = client.get(f"/changes/{change_id}").json()
+    assert "diff" in single
+    assert any("-Old content" in line for line in single["diff"])
+
+    # Verify changes HTML page renders successfully
+    html_resp = client.get("/ui/changes")
+    assert html_resp.status_code == 200
+    assert "filter-tabs" in html_resp.text
+    assert "View Diff / Proposed Content" in html_resp.text
