@@ -4,6 +4,10 @@ import sys
 import time
 import httpx
 
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
+
 
 def benchmark_chat_response(app_base_url: str, message: str, thinking: bool = False):
     """Test Chat Response Rate of the Tiny Brain application with live streaming feedback."""

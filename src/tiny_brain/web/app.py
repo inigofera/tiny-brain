@@ -224,9 +224,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             retrieval = (Retriever(connection, embedding_provider).search(query, limit=8, context_tokens=settings.context_tokens // 2)
                          if query else RetrievalResult("", (), (), 0))
             answer_retrieval = retrieval
-            tools = ReadTools(settings.vault_root, connection, embedding_provider)
             try:
-                result = await ChatAgent(llama, settings.max_tool_loops).answer(request.message, answer_retrieval, tools, thinking=request.thinking)
+                result = await ChatAgent(llama, settings.max_tool_loops).answer(request.message, answer_retrieval, tools=None, thinking=request.thinking)
                 answer = result.answer
             except Exception as exc:
                 raise HTTPException(status_code=503, detail="local model is unavailable") from exc

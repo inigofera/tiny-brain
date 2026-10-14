@@ -93,3 +93,21 @@ def test_low_signal_semantic_hits_are_excluded(tmp_path: Path):
     with database.connect() as connection:
         result = Retriever(connection, provider).search("target", limit=3)
     assert [citation.relative_path for citation in result.citations] == ["target.md"]
+
+
+def test_1_hop_backlinks_and_tag_matches_are_retrieved(tmp_path: Path):
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    (vault / "core.md").write_text("# Core Topic\nKey information here. #architecture", encoding="utf-8")
+    (vault / "linking.md").write_text("# Linking Note\nSee [[core]] for details.", encoding="utf-8")
+    (vault / "tagged.md").write_text("# Tagged Note\nAnother note with #architecture.", encoding="utf-8")
+    database = Database(tmp_path / "db.sqlite")
+    database.migrate()
+    VaultIndexer(vault, database).full_scan()
+    with database.connect() as connection:
+        result = Retriever(connection).search("Core Topic", limit=5)
+        paths = [c.relative_path for c in result.citations]
+        assert "core.md" in paths
+        assert "linking.md" in paths
+        assert "tagged.md" in paths
+

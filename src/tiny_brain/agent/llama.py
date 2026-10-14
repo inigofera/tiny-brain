@@ -28,10 +28,26 @@ class LlamaClient:
         except httpx.HTTPError:
             return False
 
-    async def complete(self, messages: list[dict[str, Any]], *, temperature: float = 0.2, stream: bool = False, tools: list[dict[str, Any]] | None = None, thinking: bool = True) -> dict[str, Any]:
-        payload: dict[str, Any] = {"model": self.model, "messages": messages, "temperature": temperature, "stream": stream, "max_tokens": self.max_tokens}
+    async def complete(
+        self,
+        messages: list[dict[str, Any]],
+        *,
+        temperature: float = 0.2,
+        max_tokens: int | None = None,
+        stream: bool = False,
+        tools: list[dict[str, Any]] | None = None,
+        thinking: bool = True,
+        grammar: str | None = None,
+        response_format: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        output_tokens = max_tokens or self.max_tokens
+        payload: dict[str, Any] = {"model": self.model, "messages": messages, "temperature": temperature, "stream": stream, "max_tokens": output_tokens}
         if tools:
             payload["tools"] = tools
+        if grammar:
+            payload["grammar"] = grammar
+        if response_format:
+            payload["response_format"] = response_format
         if not thinking:
             payload["reasoning_effort"] = "none"
             payload["chat_template_kwargs"] = {"enable_thinking": False}
@@ -42,6 +58,7 @@ class LlamaClient:
             )
             response.raise_for_status()
             return response.json()
+
 
     async def stream(self, messages: list[dict[str, Any]], *, temperature: float = 0.2, max_tokens: int | None = None, reasoning_effort: str | None = None, thinking: bool = True) -> AsyncIterator[StreamChunk]:
         output_tokens = max_tokens or self.max_tokens

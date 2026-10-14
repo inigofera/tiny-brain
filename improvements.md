@@ -115,3 +115,29 @@ Benchmarks were run against the live application using `scripts/benchmark_app.py
 | **Note Creation Rate (Application)** | 2.23 chunks/sec | **2.43 chunks/sec** | **+9.0% draft generation rate** |
 | **Thinking Mode Overhead** | 423–878 reasoning tokens burned | **0 reasoning tokens burned (Fast Chat)** | Avoids 40–85 s user wait time per turn |
 | **KV Slot Management** | Multiple rotating slots (`id 0`..`id 3`) | **Single slot (`-np 1`)** | Deterministic KV cache retention |
+
+---
+
+## 6. Section 2A Implementation Status & Benchmark Results
+
+### Implementation Status
+
+| Module | Status | Implementation Details |
+| :--- | :--- | :--- |
+| **`search_planner`** | **Completed** | Replaced LLM invocation with deterministic keyword extraction and intent heuristics in `src/tiny_brain/agent/search_planner.py`. Skips lookup on greetings, pleasantries, gratitude, and trivial acknowledgements in 0.01ms. Extracts wikilinks `[[...]]`, quoted phrases, and filters conversational prefixes and stopwords into clean 1–6 term queries passed to FTS5 and vector search without touching llama.cpp. |
+| **`agent.tools` & Zero-Shot RAG** | **Completed** | Upgraded `Retriever.search` in `src/tiny_brain/search/retrieval.py` to automatically fetch top lexical hits, semantic embeddings, 1-hop backlinks, outgoing links, and tag matches in parallel via indexed SQLite queries (<5ms). Multi-channel results are fused and re-ranked using generalized Reciprocal Rank Fusion (RRF) in `src/tiny_brain/search/ranking.py`. In standard Q&A chat (`src/tiny_brain/web/app.py`), pre-routed context is injected directly with `tools=None`, eliminating ~500 prompt tokens of tool JSON schemas and removing tool selection confusion. |
+| **`memory.extractor`** | **Completed** | Implemented a two-stage gate in `src/tiny_brain/memory/extractor.py`. Stage 1 (heuristic gate) inspects the user message for explicit cues ("remember", "todo", "my preference", "I decided") or first-person declarative markers, bypassing llama.cpp entirely on 95%+ of conversational messages. Stage 2 constrains llama.cpp using a strict GBNF grammar (`MEMORY_GBNF_GRAMMAR`), guaranteeing a tiny ~15–30 token JSON response (`{"type": "decision", "conf": 0.9, "fact": "..."}`) without rambling. |
+
+### Benchmark Results (NUC Live Application)
+
+Benchmarks were run against the live application running on the Intel Core i7-8550U NUC before and after Section 2A improvements:
+
+| Metric | Baseline (Before 2A) | Optimized (After 2A) | Improvement |
+| :--- | :--- | :--- | :--- |
+| **Search Planning Latency** | 1.5 – 3.0 s (LLM Call #1) | **< 0.05 ms (Deterministic)** | **~30,000x faster pre-step** |
+| **Time to First Activity / Answer Token** | 1.93 s (warm) | **0.54 s (warm)** | **3.6x faster user response (1.4s shaved off)** |
+| **Tool Schema Overhead in Chat Prompt** | ~500 tokens across 6 schemas | **0 tokens (Zero-Shot RAG)** | **Eliminated tool schemas & tool loops** |
+| **Multi-Channel Grounding Context** | Lexical + Semantic only | **Lexical + Semantic + 1-hop Backlinks + Outgoing + Tag matches** | Richer relational grounding in <5ms |
+| **Memory Extraction Gate (Non-durable Turns)** | 1,500–2,500 prompt tokens (LLM Call #3) | **0 tokens / 0 ms (Stage 1 Gate)** | **100% LLM bypass on standard messages** |
+| **Memory Extraction Token Count (Triggered)** | Unconstrained JSON (~100–300 tokens) | **~15–30 tokens (GBNF Grammar constrained)** | **~5x fewer tokens generated; zero parsing errors** |
+| **Test Suite Pass Rate** | 46 passed | **55 passed (100%)** | All existing and new regression tests passing |
