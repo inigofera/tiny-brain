@@ -1,0 +1,11 @@
+.git
+.pytest_cache
+__pycache__
+*.pyc
+build
+data
+models
+vault
+caddy-data
+caddy-config
+syncthing

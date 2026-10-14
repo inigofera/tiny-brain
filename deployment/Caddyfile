@@ -1,0 +1,14 @@
+{
+    auto_https disable_redirects
+}
+
+:80 {
+    encode gzip
+    reverse_proxy app:8000
+}
+
+tiny-brain.home.arpa {
+    tls internal
+    encode gzip
+    reverse_proxy app:8000
+}
