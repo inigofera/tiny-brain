@@ -15,4 +15,6 @@ def extract_citation_ids(answer: str) -> list[str]:
 def validate_answer(answer: str, retrieval: RetrievalResult) -> tuple[bool, list[str]]:
     citation_ids = extract_citation_ids(answer)
     allowed = {citation.citation_id for citation in retrieval.citations}
+    if not allowed:
+        return True, []
     return bool(citation_ids) and set(citation_ids).issubset(allowed), citation_ids

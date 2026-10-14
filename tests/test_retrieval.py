@@ -111,3 +111,17 @@ def test_1_hop_backlinks_and_tag_matches_are_retrieved(tmp_path: Path):
         assert "linking.md" in paths
         assert "tagged.md" in paths
 
+
+def test_spurious_single_word_matches_are_excluded(tmp_path: Path):
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    # Note has only "political", but query asks about "spanish political parties"
+    (vault / "politics.md").write_text("# Politics\nGeneral political philosophy and state theory.", encoding="utf-8")
+    database = Database(tmp_path / "db.sqlite")
+    database.migrate()
+    VaultIndexer(vault, database).full_scan()
+    with database.connect() as connection:
+        result = Retriever(connection).search("spanish political parties", limit=5)
+        # Should NOT match because neither "spanish" nor "parties" exist in the note
+        assert not result.citations
+

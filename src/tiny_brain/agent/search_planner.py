@@ -23,6 +23,9 @@ CHITCHAT_PATTERN = re.compile(
 # Question and conversational prefix phrases to strip before keyword extraction
 PREFIX_PATTERNS = [
     re.compile(r"^\s*(?:can\s+you\s+)?(?:please\s+)?(?:tell\s+me\s+about|explain|describe|show\s+me|find|look\s+up|search\s+for)\s+", re.IGNORECASE),
+    re.compile(r"^\s*(?:tell\s+me\s+)?what\s+(?:do\s+you\s+know|can\s+you\s+tell\s+me)\s+about\s+", re.IGNORECASE),
+    re.compile(r"^\s*(?:i(?:'m|m|\s+am)?\s+)?(?:unsure|wondering|curious)\s+about\s+", re.IGNORECASE),
+    re.compile(r"^\s*(?:can\s+you\s+)?(?:give\s+me\s+an?\s+(?:overview|summary)\s+of)\s+", re.IGNORECASE),
     re.compile(r"^\s*do\s+we\s+have\s+(?:anything\s+written\s+down\s+about|notes\s+on|anything\s+on|information\s+on)\s+", re.IGNORECASE),
     re.compile(r"^\s*what\s+(?:have\s+i|did\s+i)\s+(?:written\s+down\s+about|written\s+about|said\s+about)\s+", re.IGNORECASE),
     re.compile(r"^\s*what\s+does\s+(?:our\s+notes?|the\s+vault|Guide)\s+say\s+about\s+", re.IGNORECASE),
@@ -33,29 +36,34 @@ PREFIX_PATTERNS = [
 # Common English stopwords + question/conversational filler words
 STOPWORDS = frozenset({
     "a", "about", "above", "after", "again", "against", "all", "am", "an", "and",
-    "any", "are", "aren't", "as", "at", "be", "because", "been", "before", "being",
-    "below", "between", "both", "but", "by", "can", "can't", "cannot", "could",
-    "couldn't", "did", "didn't", "do", "does", "doesn't", "doing", "don't", "down",
+    "any", "are", "aren't", "arent", "as", "at", "be", "because", "been", "before", "being",
+    "below", "between", "both", "but", "by", "can", "can't", "cant", "cannot", "could",
+    "couldn't", "did", "didn't", "didnt", "do", "does", "doesn't", "doesnt", "doing", "don't", "dont", "down",
     "during", "each", "few", "for", "from", "further", "had", "hadn't", "has",
     "hasn't", "have", "haven't", "having", "he", "he'd", "he'll", "he's", "her",
     "here", "here's", "hers", "herself", "him", "himself", "his", "how", "how's",
-    "i", "i'd", "i'll", "i'm", "i've", "if", "in", "into", "is", "isn't", "it",
+    "i", "i'd", "id", "i'll", "ill", "i'm", "im", "i've", "ive", "if", "in", "into", "is", "isn't", "isnt", "it",
     "it's", "its", "itself", "let's", "me", "more", "most", "mustn't", "my",
     "myself", "no", "nor", "not", "of", "off", "on", "once", "only", "or",
     "other", "ought", "our", "ours", "ourselves", "out", "over", "own", "same",
     "shan't", "she", "she'd", "she'll", "she's", "should", "shouldn't", "so",
     "some", "such", "than", "that", "that's", "the", "their", "theirs", "them",
     "themselves", "then", "there", "there's", "these", "they", "they'd", "they'll",
-    "they're", "they've", "this", "those", "through", "to", "too", "under",
-    "until", "up", "very", "was", "wasn't", "we", "we'd", "we'll", "we're",
-    "we've", "were", "weren't", "what", "what's", "when", "when's", "where",
-    "where's", "which", "while", "who", "who's", "whom", "why", "why's", "with",
-    "won't", "would", "wouldn't", "you", "you'd", "you'll", "you're", "you've",
+    "they're", "theyre", "they've", "theyve", "this", "those", "through", "to", "too", "under",
+    "until", "up", "very", "was", "wasn't", "we", "we'd", "we'll", "we're", "we've",
+    "were", "weren't", "what", "what's", "whats", "when", "when's", "where",
+    "where's", "which", "while", "who", "who's", "whos", "whom", "why", "why's", "with",
+    "won't", "wont", "would", "wouldn't", "you", "you'd", "youd", "you'll", "you're", "youre", "you've", "youve",
     "your", "yours", "yourself", "yourselves",
     # Question/instruction conversational fillers
     "please", "tell", "explain", "describe", "show", "give", "know", "think",
     "help", "look", "find", "search", "something", "anything", "quick", "summary",
     "written", "down", "notes", "note", "vault",
+    # Conversational state / opinion / meta-referential words
+    "curious", "wondering", "unsure", "sure", "interested", "opinion", "opinions",
+    "options", "option", "overview", "perspective", "recommendation", "recommendations",
+    "topic", "topics", "subject", "subjects", "thing", "things", "idea", "ideas",
+    "next", "general", "current", "recent",
 })
 
 

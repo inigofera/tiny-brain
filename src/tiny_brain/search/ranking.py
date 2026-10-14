@@ -17,12 +17,13 @@ class RankedHit:
     reasons: list[str]
 
 
-def reciprocal_rank_fusion(*hit_lists: Sequence[Any], limit: int = 20, constant: float = 60.0) -> list[RankedHit]:
+def reciprocal_rank_fusion(*hit_lists: Sequence[Any], limit: int = 20, constant: float = 60.0, weights: Sequence[float] | None = None) -> list[RankedHit]:
     """Multi-channel Reciprocal Rank Fusion across lexical, semantic, backlink, and tag hits."""
     merged: dict[str, RankedHit] = {}
-    for hit_list in hit_lists:
+    for idx, hit_list in enumerate(hit_lists):
         if not hit_list:
             continue
+        weight = weights[idx] if weights and idx < len(weights) else 1.0
         for rank, hit in enumerate(hit_list, start=1):
             if isinstance(hit, LexicalHit):
                 reasons = ["lexical match"]
@@ -35,7 +36,7 @@ def reciprocal_rank_fusion(*hit_lists: Sequence[Any], limit: int = 20, constant:
                 hit.section_id,
                 RankedHit(hit.section_id, hit.relative_path, hit.title, hit.heading_path, hit.content, 0.0, []),
             )
-            item.score += 1.0 / (constant + rank)
+            item.score += weight / (constant + rank)
             for reason in reasons:
                 if reason not in item.reasons:
                     item.reasons.append(reason)

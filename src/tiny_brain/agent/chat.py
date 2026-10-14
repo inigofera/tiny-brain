@@ -24,9 +24,10 @@ class ChatAgent:
         self.max_tool_loops = max_tool_loops
 
     async def answer(self, question: str, retrieval: RetrievalResult, tools: ReadTools | None = None, *, thinking: bool = True) -> ChatResult:
+        user_content = f"Sources:\n{retrieval.context()}\n\nQuestion: {question}" if retrieval.citations else f"Question: {question}"
         messages: list[dict[str, Any]] = [
             {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": f"Sources:\n{retrieval.context()}\n\nQuestion: {question}"},
+            {"role": "user", "content": user_content},
         ]
         errors: list[str] = []
         reasoning_parts: list[str] = []

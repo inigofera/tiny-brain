@@ -256,10 +256,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         answer_retrieval = retrieval
         draft_prefix = "# Draft note\n\n"
         conversation_context = _conversation_context_for(request.message, request.context, draft_mode=draft_mode)
-        source_context = answer_retrieval.context() if answer_retrieval.citations else ""
+        source_block = f"Vault sources:\n{answer_retrieval.context()}\n\n" if answer_retrieval.citations else ""
+        user_content = f"{source_block}Conversation history:\n{conversation_context}\n\nCurrent question: {request.message}"
         messages = [
             {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": f"Vault sources:\n{source_context}\n\nConversation history:\n{conversation_context}\n\nCurrent question: {request.message}"},
+            {"role": "user", "content": user_content},
         ]
         if draft_mode:
             messages.append({"role": "assistant", "content": draft_prefix})

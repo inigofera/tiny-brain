@@ -53,14 +53,22 @@ class Retriever:
 
         # Identify primary target notes and sections from top direct hits
         primary_section_ids = [hit.section_id for hit in lexical[:10]] + [hit.section_id for hit in semantic[:10]]
+        explicit_tag_words = [w.lstrip("#").lower() for w in query.split() if w.startswith("#") and len(w) > 1]
+        if not primary_section_ids and not explicit_tag_words:
+            return RetrievalResult(query, (), (), 0)
+
         primary_note_ids, primary_paths = self._primary_note_identifiers(primary_section_ids)
 
         backlinks = self._fetch_backlinks(primary_note_ids, primary_paths, limit=max(limit * 2, 10))
         outgoing = self._fetch_outgoing_links(primary_section_ids, limit=max(limit * 2, 10))
         tag_matches = self._fetch_tag_matches(primary_note_ids, query, limit=max(limit * 2, 10))
 
-        # Rank all channels in parallel via Reciprocal Rank Fusion
-        ranked = reciprocal_rank_fusion(lexical, semantic, backlinks, outgoing, tag_matches, limit=max(limit * 2, 16))
+        # Rank all channels in parallel via Reciprocal Rank Fusion with direct channels weighted above graph expansion
+        ranked = reciprocal_rank_fusion(
+            lexical, semantic, backlinks, outgoing, tag_matches,
+            weights=(1.0, 1.0, 0.5, 0.5, 0.5),
+            limit=max(limit * 2, 16),
+        )
 
         selected: list[RankedHit] = []
         citations: list[Citation] = []
@@ -82,6 +90,8 @@ class Retriever:
 
     def validate_citations(self, result: RetrievalResult, citation_ids: list[str]) -> bool:
         allowed = {citation.citation_id for citation in result.citations}
+        if not allowed:
+            return True
         return bool(citation_ids) and set(citation_ids).issubset(allowed)
 
     def _semantic_search(self, query: str, limit: int) -> list[RankedHit]:
@@ -179,9 +189,10 @@ class Retriever:
             ])
 
         # 2. Notes matching tags in query words
-        words = [w.lstrip("#").lower() for w in query.split() if len(w) > 2]
-        if words:
-            tag_placeholders = ",".join("?" for _ in words)
+        explicit_tags = [w.lstrip("#").lower() for w in query.split() if w.startswith("#") and len(w) > 1]
+        target_tags = explicit_tags if not note_ids else [w.lstrip("#").lower() for w in query.split() if len(w) > 2]
+        if target_tags:
+            tag_placeholders = ",".join("?" for _ in target_tags)
             rows = self.connection.execute(
                 f"""SELECT DISTINCT s.section_id, s.relative_path, n.title, s.heading_path_json, s.content
                     FROM tags t
@@ -189,7 +200,7 @@ class Retriever:
                     JOIN notes n ON n.note_id = s.note_id
                     WHERE lower(t.tag) IN ({tag_placeholders})
                     LIMIT ?""",
-                words + [limit],
+                target_tags + [limit],
             ).fetchall()
             existing_ids = {h.section_id for h in hits}
             for row in rows:

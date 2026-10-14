@@ -47,3 +47,10 @@ async def test_plan_vault_search_deterministic():
 
     query_chitchat = await plan_vault_search(None, "hello there!")
     assert query_chitchat is None
+
+
+def test_extract_search_query_filters_conversational_and_meta_inquiries():
+    assert extract_search_query("what do you know about this topic? im curious") is None
+    assert extract_search_query("tell me what you know about spanish political parties") == "spanish political parties"
+    assert extract_search_query("im unsure about who to vote for in the next spanish general elections. can you give me an overview of my options?") == "vote spanish elections"
+
