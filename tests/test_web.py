@@ -234,3 +234,49 @@ def test_chat_stream_includes_sources_in_done_event(tmp_path: Path):
     assert done_payload["sources"][0]["citation_id"] == "S1"
     assert done_payload["sources"][0]["relative_path"] == "Guide.md"
     assert "Tiny Brain provides local grounding" in done_payload["sources"][0]["content"]
+
+
+def test_chat_session_persistence_and_new_session(tmp_path: Path):
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    (vault / "Guide.md").write_text("# Guide\nTiny Brain provides local grounding.\n", encoding="utf-8")
+    settings = Settings(vault, tmp_path / "data", tmp_path / "data/db.sqlite", tmp_path / "models", "http://127.0.0.1:9/v1", "model", "embed", "none", 8192, 4, "tiny-brain.test", True, .9, True, "127.0.0.1", 8000)
+    app = create_app(settings)
+    app.state.indexer.full_scan()
+
+    class FakeLlama:
+        async def complete(self, messages, **kwargs):
+            return {"choices": [{"message": {"content": "Guide"}}]}
+
+        async def stream(self, messages, **kwargs):
+            yield StreamChunk(content="Here is the stored answer.")
+
+    app.state.llama = FakeLlama()
+    client = TestClient(app)
+
+    # Initially empty history
+    history = client.get("/chat/history").json()
+    assert history["messages"] == []
+    initial_session_id = history["session_id"]
+
+    # Stream a chat turn
+    client.post("/chat/stream", json={"message": "First question", "thinking": False})
+
+    # History should now contain 2 messages
+    history = client.get("/chat/history").json()
+    assert history["session_id"] == initial_session_id
+    assert len(history["messages"]) == 2
+    assert history["messages"][0]["role"] == "user"
+    assert history["messages"][0]["content"] == "First question"
+    assert history["messages"][1]["role"] == "assistant"
+    assert history["messages"][1]["content"] == "Here is the stored answer."
+
+    # Starting a new session creates a fresh active session
+    new_sess = client.post("/chat/new").json()
+    assert new_sess["status"] == "created"
+    assert new_sess["session_id"] != initial_session_id
+
+    # New session history is empty
+    fresh_history = client.get("/chat/history").json()
+    assert fresh_history["session_id"] == new_sess["session_id"]
+    assert fresh_history["messages"] == []

@@ -3,7 +3,9 @@ from __future__ import annotations
 import json
 import logging
 import re
+import uuid
 from dataclasses import asdict
+from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request
@@ -78,6 +80,28 @@ def _draft_topic(message: str) -> str:
         if heading.strip().lower() != "draft note":
             return heading.strip()
     return ""
+
+
+def get_or_create_active_session(connection) -> str:
+    row = connection.execute("SELECT session_id FROM sessions WHERE active = 1 ORDER BY updated_at DESC LIMIT 1").fetchone()
+    if row:
+        return str(row[0])
+    now = datetime.now(timezone.utc).isoformat()
+    session_id = str(uuid.uuid4())
+    connection.execute("INSERT INTO sessions(session_id, created_at, updated_at, active) VALUES (?, ?, ?, 1)", (session_id, now, now))
+    return session_id
+
+
+def record_chat_message(connection, session_id: str, role: str, content: str, *, classification: dict | None = None, retrieval: dict | None = None) -> str:
+    now = datetime.now(timezone.utc).isoformat()
+    message_id = str(uuid.uuid4())
+    connection.execute(
+        """INSERT INTO messages(message_id, session_id, role, content, created_at, classification_json, retrieval_json)
+           VALUES (?, ?, ?, ?, ?, ?, ?)""",
+        (message_id, session_id, role, content, now, json.dumps(classification) if classification else None, json.dumps(retrieval) if retrieval else None),
+    )
+    connection.execute("UPDATE sessions SET updated_at = ? WHERE session_id = ?", (now, session_id))
+    return message_id
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -192,6 +216,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.post("/chat")
     async def chat(request: ChatRequest) -> JSONResponse:
+        with database.connect() as connection:
+            session_id = get_or_create_active_session(connection)
+            record_chat_message(connection, session_id, "user", request.message)
         query = await plan_vault_search(app.state.llama, request.message)
         with database.connect() as connection:
             retrieval = (Retriever(connection, embedding_provider).search(query, limit=8, context_tokens=settings.context_tokens // 2)
@@ -204,11 +231,20 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             except Exception as exc:
                 raise HTTPException(status_code=503, detail="local model is unavailable") from exc
         valid, citations = validate_answer(answer, answer_retrieval)
+        sources_list = [asdict(citation) for citation in retrieval.citations]
+        with database.connect() as connection:
+            record_chat_message(
+                connection, session_id, "assistant", answer,
+                retrieval={"sources": sources_list, "citations": citations, "citation_valid": valid}
+            )
         return JSONResponse({"answer": answer, "reasoning": result.reasoning, "citations": citations, "citation_valid": valid,
-                             "sources": [asdict(citation) for citation in retrieval.citations]})
+                             "sources": sources_list})
 
     @app.post("/chat/stream")
     async def chat_stream(request: ChatRequest):
+        with database.connect() as connection:
+            session_id = get_or_create_active_session(connection)
+            record_chat_message(connection, session_id, "user", request.message)
         draft_request = _is_draft_request(request.message)
         draft_topic = _draft_topic(request.message) if draft_request else ""
         if draft_request and not draft_topic and request.context:
@@ -255,11 +291,46 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     if proposal is not None:
                         yield f"data: {json.dumps({'type': 'vault_proposal', 'proposal': proposal})}\n\n"
                 sources = [asdict(citation) for citation in answer_retrieval.citations]
+                with database.connect() as connection:
+                    record_chat_message(
+                        connection, session_id, "assistant", answer,
+                        retrieval={"sources": sources, "citations": citations, "citation_valid": valid}
+                    )
                 yield f"data: {json.dumps({'type': 'done', 'reasoning': ''.join(reasoning_parts), 'citation_valid': valid, 'citations': citations, 'sources': sources, 'draft_mode': draft_mode, 'draft_topic': draft_topic if draft_mode else None})}\n\n"
             except Exception:
                 yield f"data: {json.dumps({'type': 'error', 'detail': 'local model is unavailable'})}\n\n"
 
         return StreamingResponse(events(), media_type="text/event-stream", headers={"Cache-Control": "no-cache"})
+
+    @app.get("/chat/history")
+    async def chat_history() -> dict[str, object]:
+        with database.connect() as connection:
+            session_id = get_or_create_active_session(connection)
+            rows = connection.execute(
+                "SELECT * FROM messages WHERE session_id = ? ORDER BY created_at ASC", (session_id,)
+            ).fetchall()
+        messages = []
+        for row in rows:
+            retrieval = json.loads(row["retrieval_json"]) if row["retrieval_json"] else {}
+            messages.append({
+                "message_id": row["message_id"],
+                "role": row["role"],
+                "content": row["content"],
+                "created_at": row["created_at"],
+                "sources": retrieval.get("sources", []),
+                "citations": retrieval.get("citations", []),
+                "citation_valid": retrieval.get("citation_valid", True),
+            })
+        return {"session_id": session_id, "messages": messages}
+
+    @app.post("/chat/new")
+    async def new_chat_session() -> dict[str, str]:
+        now = datetime.now(timezone.utc).isoformat()
+        with database.connect() as connection:
+            connection.execute("UPDATE sessions SET active = 0 WHERE active = 1")
+            new_id = str(uuid.uuid4())
+            connection.execute("INSERT INTO sessions(session_id, created_at, updated_at, active) VALUES (?, ?, ?, 1)", (new_id, now, now))
+        return {"session_id": new_id, "status": "created"}
 
     @app.post("/chat/draft/revise")
     async def revise_draft(request: DraftRevisionRequest) -> dict[str, str]:
