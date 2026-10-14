@@ -286,7 +286,27 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                         yield f"data: {json.dumps({'type': 'token', 'content': chunk.content})}\n\n"
                 answer = "".join(answer_parts)
                 valid, citations = validate_answer(answer, answer_retrieval)
-                if not draft_mode:
+                if draft_mode and answer.strip():
+                    clean_content = re.sub(r"^(?:\s*#\s+Draft note\s*)+", "", answer, flags=re.IGNORECASE).strip() + "\n"
+                    topic = draft_topic or "Draft note"
+                    target_path = re.sub(r'[\\/:*?"<>|]', "", topic).strip() or "Draft note"
+                    if not target_path.lower().endswith(".md"):
+                        target_path += ".md"
+                    existing = changes.pending_with_description(REVIEW_DESCRIPTION_PREFIXES, 10)
+                    existing_draft = next((d for d in existing if d["target_path"] == target_path), None)
+                    if existing_draft:
+                        changes.revise_pending(str(existing_draft["change_id"]), clean_content)
+                        yield f"data: {json.dumps({'type': 'vault_proposal', 'proposal': proposal_view(str(existing_draft['change_id']))})}\n\n"
+                    elif not changes.has_pending_for(target_path):
+                        change_id = changes.create_proposal(
+                            operation="create_note",
+                            target_path=target_path,
+                            proposed_content=clean_content,
+                            description=REVIEW_CREATE_PREFIX + target_path,
+                            reason="Drafted from conversation",
+                        )
+                        yield f"data: {json.dumps({'type': 'vault_proposal', 'proposal': proposal_view(change_id)})}\n\n"
+                elif not draft_mode:
                     proposal = await vault_proposal_for(request.message, answer, request.context)
                     if proposal is not None:
                         yield f"data: {json.dumps({'type': 'vault_proposal', 'proposal': proposal})}\n\n"

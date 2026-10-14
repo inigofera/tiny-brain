@@ -313,3 +313,55 @@ def test_note_inspection_page_and_search_integration(tmp_path: Path):
     assert search_page_resp.status_code == 200
     assert "obsidian://" in search_page_resp.text
     assert "Read Note" in search_page_resp.text
+
+
+def test_unified_proposal_in_draft_chat_stream(tmp_path: Path):
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    settings = Settings(vault, tmp_path / "data", tmp_path / "data/db.sqlite", tmp_path / "models", "http://127.0.0.1:9/v1", "model", "embed", "none", 8192, 4, "tiny-brain.test", True, .9, True, "127.0.0.1", 8000)
+    app = create_app(settings)
+
+    class FakeGit:
+        def commit_file(self, relative_path: str, message: str) -> str:
+            return "commit-stoicism"
+
+    app.state.changes.git = FakeGit()
+
+    class FakeLlama:
+        async def complete(self, messages, **kwargs):
+            return {"choices": [{"message": {"content": "NONE"}}]}
+
+        async def stream(self, messages, **kwargs):
+            yield StreamChunk(content="## Stoicism\nVirtue is the sole good.")
+
+    app.state.llama = FakeLlama()
+    client = TestClient(app)
+
+    response = client.post("/chat/stream", json={"message": "create a note about Stoicism", "thinking": False})
+    assert response.status_code == 200
+
+    import json
+    proposal_event = None
+    for line in response.text.splitlines():
+        if line.startswith("data: "):
+            ev = json.loads(line[6:])
+            if ev.get("type") == "vault_proposal":
+                proposal_event = ev["proposal"]
+                break
+
+    assert proposal_event is not None
+    assert proposal_event["target_path"] == "Stoicism.md"
+    assert proposal_event["is_new"] is True
+    assert "diff" in proposal_event
+    assert any("+Virtue is the sole good." in l for l in proposal_event["diff"])
+
+    # Verified in pending changes
+    pending = client.get("/changes?state=pending").json()
+    assert len(pending) == 1
+    assert pending[0]["target_path"] == "Stoicism.md"
+
+    # Approve and verify written
+    apprv = client.post(f"/changes/{proposal_event['change_id']}/approve")
+    assert apprv.status_code == 200
+    assert (vault / "Stoicism.md").exists()
+    assert "Virtue is the sole good." in (vault / "Stoicism.md").read_text(encoding="utf-8")

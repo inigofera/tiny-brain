@@ -2,46 +2,470 @@
 <html lang="en">
 <head>
   <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>Tiny Brain</title><link rel="stylesheet" href="/static/style.css">
+  <title>Tiny Brain</title>
+  <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
-  <header class="topbar"><a class="brand" href="/">TINY BRAIN</a><nav><a href="/ui/search">Search</a><a href="/ui/changes">Changes</a><span class="host">{{ host }}</span></nav></header>
+  <header class="topbar">
+    <a class="brand" href="/">TINY BRAIN</a>
+    <nav>
+      <a href="/ui/search">Search</a>
+      <a href="/ui/changes" id="nav-changes">Changes <span id="pending-badge" style="display:none;background:var(--coral);color:var(--panel);border-radius:10px;padding:1px 6px;font-size:10px;"></span></a>
+      <span class="host">{{ host }}</span>
+    </nav>
+  </header>
   <main class="shell">
-    <section class="intro"><div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:12px"><div><p class="eyebrow">LOCAL KNOWLEDGE INTERFACE</p><h1>Ask the vault.</h1><p class="lede">Grounded answers from your Obsidian notes, with the evidence left in view.</p></div><button id="btn-new-chat" type="button" class="quiet" style="margin-top:14px;height:38px;border:1px solid var(--line);background:var(--panel);color:var(--ink);font-family:'DM Mono',monospace;font-size:12px;cursor:pointer;padding:0 14px;">+ New Chat</button></div></section>
-    <section class="chat-panel"><div id="messages" class="messages"><div class="message assistant"><span class="label">TINY BRAIN</span><p>Ask about an indexed note or idea. Vault claims include citations; new drafts are clearly labeled.</p></div></div><form id="chat-form"><textarea id="prompt" maxlength="12000" placeholder="What do you want to find?" required></textarea><label class="thinking-toggle"><input id="thinking" type="checkbox" checked><span class="thinking-switch" aria-hidden="true"></span><span>Thinking</span></label><button type="submit">Ask <span aria-hidden="true">↗</span></button></form><div id="vault-proposals" class="vault-proposals" aria-live="polite"></div><p id="chat-error" class="error" hidden></p></section>
-    <aside class="warning"><strong>LAN MODE</strong><span>No application authentication is enabled in this release. Keep the endpoint on your trusted network.</span></aside>
+    <section class="intro">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:12px">
+        <div>
+          <p class="eyebrow">LOCAL KNOWLEDGE INTERFACE</p>
+          <h1>Ask the vault.</h1>
+          <p class="lede">Grounded answers from your Obsidian notes, with the evidence left in view.</p>
+        </div>
+        <button id="btn-new-chat" type="button" class="quiet" style="margin-top:14px;height:38px;border:1px solid var(--line);background:var(--panel);color:var(--ink);font-family:'DM Mono',monospace;font-size:12px;cursor:pointer;padding:0 14px;">+ New Chat</button>
+      </div>
+    </section>
+
+    <section class="chat-panel">
+      <div id="messages" class="messages">
+        <div class="message assistant">
+          <span class="label">TINY BRAIN</span>
+          <p>Ask about an indexed note or idea. Vault claims include citations; new drafts are clearly labeled.</p>
+        </div>
+      </div>
+      <form id="chat-form">
+        <textarea id="prompt" maxlength="12000" placeholder="What do you want to find or draft?" required></textarea>
+        <label class="thinking-toggle">
+          <input id="thinking" type="checkbox" checked>
+          <span class="thinking-switch" aria-hidden="true"></span>
+          <span>Thinking</span>
+        </label>
+        <button id="btn-submit" type="submit">Ask <span aria-hidden="true">↗</span></button>
+      </form>
+      <p id="chat-error" class="error" hidden></p>
+    </section>
+
+    <aside class="warning">
+      <strong>LAN MODE</strong>
+      <span>No application authentication is enabled in this release. Keep the endpoint on your trusted network.</span>
+    </aside>
   </main>
 <script>
-function escapeHtml(value){return String(value||'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[c]));}
-function renderInline(value){const code=[];let text=escapeHtml(value).replace(/`([^`\n]+)`/g,(_,item)=>{code.push(item);return `\u0000${code.length-1}\u0000`;});text=text.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g,'<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>').replace(/\*\*([^*\n]+)\*\*/g,'<strong>$1</strong>').replace(/__([^_\n]+)__/g,'<strong>$1</strong>').replace(/~~([^~\n]+)~~/g,'<del>$1</del>').replace(/\*([^*\n]+)\*/g,'<em>$1</em>').replace(/_([^_\n]+)_/g,'<em>$1</em>');return text.replace(/\u0000(\d+)\u0000/g,(_,index)=>`<code>${code[Number(index)]}</code>`);}
-function renderMarkdown(value){const lines=String(value||'').replace(/\r\n?/g,'\n').split('\n'),html=[];let paragraph=[],listType=null,listItems=[],codeLines=null,codeLanguage='';const flushParagraph=()=>{if(paragraph.length){html.push(`<p>${renderInline(paragraph.join('\n')).replace(/\n/g,'<br>')}</p>`);paragraph=[];}};const flushList=()=>{if(listType){html.push(`<${listType}>${listItems.map(item=>`<li>${renderInline(item)}</li>`).join('')}</${listType}>`);listType=null;listItems=[];}};const flushCode=()=>{if(codeLines!==null){const language=codeLanguage?` class="language-${escapeHtml(codeLanguage)}"`:'';html.push(`<pre><code${language}>${escapeHtml(codeLines.join('\n'))}</code></pre>`);codeLines=null;codeLanguage='';}};for(const line of lines){if(codeLines!==null){if(/^\s*```/.test(line)){flushCode();}else codeLines.push(line);continue;}const fence=line.match(/^\s*```\s*([\w+-]*)\s*$/);if(fence){flushParagraph();flushList();codeLines=[];codeLanguage=fence[1];continue;}if(!line.trim()){flushParagraph();flushList();continue;}const heading=line.match(/^\s*(#{1,6})\s+(.+?)\s*#*\s*$/);if(heading){flushParagraph();flushList();const level=heading[1].length;html.push(`<h${level}>${renderInline(heading[2])}</h${level}>`);continue;}const unordered=line.match(/^\s*[-*+]\s+(.+)$/);const ordered=line.match(/^\s*\d+[.)]\s+(.+)$/);if(unordered||ordered){flushParagraph();const type=unordered?'ul':'ol';if(listType!==type){flushList();listType=type;}listItems.push((unordered||ordered)[1]);continue;}if(/^\s*>/.test(line)){flushParagraph();flushList();html.push(`<blockquote>${renderInline(line.replace(/^\s*>\s?/,'') )}</blockquote>`);continue;}if(/^\s*(---+|\*\*\*+)\s*$/.test(line)){flushParagraph();flushList();html.push('<hr>');continue;}paragraph.push(line);}flushParagraph();flushList();flushCode();return html.join('');}
-const form=document.querySelector('#chat-form'), prompt=document.querySelector('#prompt'), thinking=document.querySelector('#thinking'), messages=document.querySelector('#messages'), error=document.querySelector('#chat-error'), newChatBtn=document.querySelector('#btn-new-chat');
-function renderAssistantMessage(msg){const el=document.createElement('div');el.className='message assistant';let sourcesHtml='';if(msg.sources&&msg.sources.length){sourcesHtml=`<div class="sources-panel"><details class="sources-details"><summary class="sources-summary">Evidence in View (${msg.sources.length})</summary><div class="sources-list">${msg.sources.map(s=>`<div class="source-card"><div class="source-header"><span class="source-badge">${escapeHtml(s.citation_id)}</span><span class="source-title">${escapeHtml(s.title||s.relative_path)}</span><span class="source-meta">${escapeHtml(s.relative_path)}${s.heading_path?' · '+escapeHtml(s.heading_path):''}</span></div><pre class="source-content">${escapeHtml(s.content)}</pre></div>`).join('')}</div></details></div>`;}let citationText='Answered without vault sources';if(msg.sources&&msg.sources.length){if(msg.citation_valid&&msg.citations&&msg.citations.length)citationText='Verified citations: '+msg.citations.join(', ');else if(msg.citation_valid)citationText='Vault sources consulted';else citationText='⚠️ Citation review required (unverified claims or missing citations)';}el.innerHTML=`<span class="label">TINY BRAIN</span><div class="answer-text markdown">${renderMarkdown(msg.content)}</div>${sourcesHtml}<small class="citation-note">${escapeHtml(citationText)}</small>`;return el;}
-async function loadChatHistory(){try{const r=await fetch('/chat/history');if(!r.ok)return;const data=await r.json();if(data.messages&&data.messages.length){messages.innerHTML='';for(const m of data.messages){if(m.role==='user')messages.insertAdjacentHTML('beforeend',`<div class="message user"><span class="label">YOU</span><p>${escapeHtml(m.content)}</p></div>`);else if(m.role==='assistant')messages.appendChild(renderAssistantMessage(m));}messages.scrollTop=messages.scrollHeight;}}catch(e){}}
+function escapeHtml(value){ return String(value||'').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[c])); }
+
+function renderInline(value){
+  const code = [];
+  let text = escapeHtml(value).replace(/`([^`\n]+)`/g, (_, item) => { code.push(item); return `\u0000${code.length-1}\u0000`; });
+  text = text.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>')
+             .replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>')
+             .replace(/__([^_\n]+)__/g, '<strong>$1</strong>')
+             .replace(/~~([^~\n]+)~~/g, '<del>$1</del>')
+             .replace(/\*([^*\n]+)\*/g, '<em>$1</em>')
+             .replace(/_([^_\n]+)_/g, '<em>$1</em>');
+  return text.replace(/\u0000(\d+)\u0000/g, (_, index) => `<code>${code[Number(index)]}</code>`);
+}
+
+function renderMarkdown(value){
+  const lines = String(value||'').replace(/\r\n?/g, '\n').split('\n'), html = [];
+  let paragraph = [], listType = null, listItems = [], codeLines = null, codeLanguage = '';
+
+  const flushParagraph = () => {
+    if(paragraph.length){ html.push(`<p>${renderInline(paragraph.join('\n')).replace(/\n/g, '<br>')}</p>`); paragraph = []; }
+  };
+  const flushList = () => {
+    if(listType){ html.push(`<${listType}>${listItems.map(item => `<li>${renderInline(item)}</li>`).join('')}</${listType}>`); listType = null; listItems = []; }
+  };
+  const flushCode = () => {
+    if(codeLines !== null){
+      const lang = codeLanguage ? ` class="language-${escapeHtml(codeLanguage)}"` : '';
+      html.push(`<pre><code${lang}>${escapeHtml(codeLines.join('\n'))}</code></pre>`);
+      codeLines = null; codeLanguage = '';
+    }
+  };
+
+  for(const line of lines){
+    if(codeLines !== null){
+      if(/^\s*```/.test(line)) flushCode();
+      else codeLines.push(line);
+      continue;
+    }
+    const fence = line.match(/^\s*```\s*([\w+-]*)\s*$/);
+    if(fence){ flushParagraph(); flushList(); codeLines = []; codeLanguage = fence[1]; continue; }
+    if(!line.trim()){ flushParagraph(); flushList(); continue; }
+    const heading = line.match(/^\s*(#{1,6})\s+(.+?)\s*#*\s*$/);
+    if(heading){ flushParagraph(); flushList(); const level = heading[1].length; html.push(`<h${level}>${renderInline(heading[2])}</h${level}>`); continue; }
+    const unordered = line.match(/^\s*[-*+]\s+(.+)$/);
+    const ordered = line.match(/^\s*\d+[.)]\s+(.+)$/);
+    if(unordered || ordered){
+      flushParagraph();
+      const type = unordered ? 'ul' : 'ol';
+      if(listType !== type){ flushList(); listType = type; }
+      listItems.push((unordered || ordered)[1]);
+      continue;
+    }
+    if(/^\s*>/.test(line)){ flushParagraph(); flushList(); html.push(`<blockquote>${renderInline(line.replace(/^\s*>\s?/, ''))}</blockquote>`); continue; }
+    if(/^\s*(---+|\*\*\*+)\s*$/.test(line)){ flushParagraph(); flushList(); html.push('<hr>'); continue; }
+    paragraph.push(line);
+  }
+  flushParagraph(); flushList(); flushCode();
+  return html.join('');
+}
+
+function diffLineClass(line){
+  if(line.startsWith('+++')||line.startsWith('---')) return 'meta';
+  if(line.startsWith('@@')) return 'hunk';
+  if(line.startsWith('+')) return 'add';
+  if(line.startsWith('-')) return 'del';
+  return 'ctx';
+}
+
+function setCardStatus(card, text, isError){
+  const el = card.querySelector('.vault-status');
+  if(!el) return;
+  el.textContent = text;
+  el.classList.toggle('error', Boolean(isError));
+}
+
+function lockCard(card){
+  card.querySelectorAll('button, textarea, input').forEach(el => { el.disabled = true; });
+}
+
+function unlockCard(card){
+  card.querySelectorAll('button, textarea, input').forEach(el => { el.disabled = false; });
+}
+
+async function updatePendingBadge(){
+  try{
+    const r = await fetch('/changes?state=pending');
+    if(!r.ok) return;
+    const items = await r.json();
+    const badge = document.querySelector('#pending-badge');
+    if(badge){
+      if(items.length > 0){
+        badge.textContent = items.length;
+        badge.style.display = 'inline-block';
+      } else {
+        badge.style.display = 'none';
+      }
+    }
+  }catch(e){}
+}
+
+function renderProposalCard(view){
+  const card = document.createElement('div');
+  card.className = 'vault-card';
+  card.dataset.changeId = view.change_id;
+
+  const diffHtml = (view.diff && view.diff.length)
+    ? view.diff.map(line => `<span class="diff-line ${diffLineClass(line)}">${escapeHtml(line)}</span>`).join('')
+    : '<span class="diff-line ctx">No textual change.</span>';
+  const truncated = view.diff_truncated ? '<small class="vault-note">Diff truncated.</small>' : '';
+
+  card.innerHTML = `
+    <p class="vault-title">
+      <span class="vault-kind">${view.is_new ? 'New note' : 'Update note'}</span>
+      <code>${escapeHtml(view.target_path)}</code>
+    </p>
+    <p class="vault-reason">${escapeHtml(view.reason || '')}</p>
+    <details open style="margin-bottom:8px;">
+      <summary style="cursor:pointer;font-family:'DM Mono',monospace;font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--ink);">View Diff / Proposed Content</summary>
+      <pre class="diff">${diffHtml}</pre>
+      ${truncated}
+    </details>
+    <div class="vault-actions">
+      <button type="button" class="vault-accept">Approve &amp; Save</button>
+      <button type="button" class="vault-edit-toggle quiet">Suggest Edit</button>
+      <button type="button" class="vault-refuse quiet">Decline</button>
+    </div>
+    <div class="vault-edit" hidden>
+      <textarea rows="3" maxlength="4000" placeholder="Describe the change you want to make..."></textarea>
+      <button type="button" class="vault-edit-apply">Apply Edit</button>
+    </div>
+    <small class="vault-status"></small>
+  `;
+
+  // Approve & Save
+  card.querySelector('.vault-accept').addEventListener('click', async () => {
+    lockCard(card);
+    setCardStatus(card, 'Saving and committing to Git...');
+    try{
+      const response = await fetch('/changes/' + view.change_id + '/approve', {method: 'POST'});
+      const data = await response.json();
+      if(!response.ok) throw new Error(data.detail || 'Could not approve change');
+      setCardStatus(card, 'Saved to ' + view.target_path + ' and committed to Git.');
+      card.querySelector('.vault-actions').style.display = 'none';
+      card.querySelector('.vault-edit').hidden = true;
+      updatePendingBadge();
+    }catch(err){
+      unlockCard(card);
+      setCardStatus(card, err.message, true);
+    }
+  });
+
+  // Decline
+  card.querySelector('.vault-refuse').addEventListener('click', async () => {
+    lockCard(card);
+    try{
+      const response = await fetch('/changes/' + view.change_id + '/reject', {method: 'POST'});
+      if(!response.ok) throw new Error('Could not decline');
+      setCardStatus(card, 'Declined; nothing was written.');
+      card.querySelector('.vault-actions').style.display = 'none';
+      card.querySelector('.vault-edit').hidden = true;
+      updatePendingBadge();
+    }catch(err){
+      unlockCard(card);
+      setCardStatus(card, err.message, true);
+    }
+  });
+
+  // Suggest Edit toggle
+  const editBox = card.querySelector('.vault-edit');
+  card.querySelector('.vault-edit-toggle').addEventListener('click', () => {
+    editBox.hidden = !editBox.hidden;
+    if(!editBox.hidden) editBox.querySelector('textarea').focus();
+  });
+
+  // Apply Edit
+  card.querySelector('.vault-edit-apply').addEventListener('click', async () => {
+    const suggestion = editBox.querySelector('textarea').value.trim();
+    if(!suggestion) return;
+    const applyBtn = card.querySelector('.vault-edit-apply');
+    applyBtn.disabled = true;
+    setCardStatus(card, 'Revising proposal with local model...');
+    try{
+      const response = await fetch('/changes/' + view.change_id + '/revise', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({suggestion})
+      });
+      const data = await response.json();
+      if(!response.ok) throw new Error(data.detail || 'Could not revise proposal');
+      card.replaceWith(renderProposalCard(data));
+      updatePendingBadge();
+    }catch(err){
+      applyBtn.disabled = false;
+      setCardStatus(card, err.message, true);
+    }
+  });
+
+  return card;
+}
+
+const form = document.querySelector('#chat-form'),
+      promptInput = document.querySelector('#prompt'),
+      thinkingCheckbox = document.querySelector('#thinking'),
+      messagesContainer = document.querySelector('#messages'),
+      errorEl = document.querySelector('#chat-error'),
+      newChatBtn = document.querySelector('#btn-new-chat');
+
+function renderAssistantMessage(msg){
+  const el = document.createElement('div');
+  el.className = 'message assistant';
+  let sourcesHtml = '';
+  if(msg.sources && msg.sources.length){
+    sourcesHtml = `
+      <div class="sources-panel">
+        <details class="sources-details">
+          <summary class="sources-summary">Evidence in View (${msg.sources.length})</summary>
+          <div class="sources-list">
+            ${msg.sources.map(s => `
+              <div class="source-card">
+                <div class="source-header">
+                  <span class="source-badge">${escapeHtml(s.citation_id)}</span>
+                  <span class="source-title">${escapeHtml(s.title||s.relative_path)}</span>
+                  <span class="source-meta">${escapeHtml(s.relative_path)}${s.heading_path?' · '+escapeHtml(s.heading_path):''}</span>
+                </div>
+                <pre class="source-content">${escapeHtml(s.content)}</pre>
+              </div>
+            `).join('')}
+          </div>
+        </details>
+      </div>`;
+  }
+  let citationText = 'Answered without vault sources';
+  if(msg.sources && msg.sources.length){
+    if(msg.citation_valid && msg.citations && msg.citations.length) citationText = 'Verified citations: ' + msg.citations.join(', ');
+    else if(msg.citation_valid) citationText = 'Vault sources consulted';
+    else citationText = '⚠️ Citation review required (unverified claims or missing citations)';
+  }
+  el.innerHTML = `
+    <span class="label">TINY BRAIN</span>
+    <div class="answer-text markdown">${renderMarkdown(msg.content)}</div>
+    ${sourcesHtml}
+    <small class="citation-note">${escapeHtml(citationText)}</small>
+  `;
+  return el;
+}
+
+async function loadChatHistory(){
+  try{
+    const r = await fetch('/chat/history');
+    if(!r.ok) return;
+    const data = await r.json();
+    if(data.messages && data.messages.length){
+      messagesContainer.innerHTML = '';
+      for(const m of data.messages){
+        if(m.role === 'user'){
+          messagesContainer.insertAdjacentHTML('beforeend', `<div class="message user"><span class="label">YOU</span><p>${escapeHtml(m.content)}</p></div>`);
+        } else if(m.role === 'assistant'){
+          messagesContainer.appendChild(renderAssistantMessage(m));
+        }
+      }
+      messagesContainer.scrollTop = messagesContainer.scrollHeight;
+    }
+  }catch(e){}
+}
+
+if(newChatBtn){
+  newChatBtn.addEventListener('click', async () => {
+    try{
+      await fetch('/chat/new', {method: 'POST'});
+      messagesContainer.innerHTML = '<div class="message assistant"><span class="label">TINY BRAIN</span><p>Ask about an indexed note or idea. Vault claims include citations; new drafts are clearly labeled.</p></div>';
+      promptInput.focus();
+    }catch(e){}
+  });
+}
+
+function buildConversationContext(){
+  const msgs = document.querySelectorAll('.message.user, .message.assistant');
+  const questions = [...msgs].filter(m => m.classList.contains('user')).map(m => m.querySelector('p')?.textContent || '').filter(Boolean);
+  const answers = [...msgs].filter(m => m.classList.contains('assistant')).map(m => m.querySelector('.answer-text')?.textContent || '').filter(Boolean).slice(-3);
+  if(!questions.length && !answers.length) return null;
+  return `Earlier user questions:\n${questions.map((q, i) => `${i+1}. ${q}`).join('\n')}\n\nRecent assistant answers:\n${answers.map((a, i) => `${i+1}. ${a}`).join('\n')}`.slice(0, 20000);
+}
+
+form.addEventListener('submit', async event => {
+  event.preventDefault();
+  errorEl.hidden = true;
+  const text = promptInput.value.trim();
+  if(!text) return;
+
+  const context = buildConversationContext();
+  messagesContainer.insertAdjacentHTML('beforeend', `<div class="message user"><span class="label">YOU</span><p>${escapeHtml(text)}</p></div>`);
+  promptInput.value = '';
+
+  const pending = document.createElement('div');
+  pending.className = 'message assistant';
+  pending.innerHTML = `
+    <span class="label">TINY BRAIN</span>
+    <div class="reasoning" hidden>
+      <span class="label">MODEL REASONING</span>
+      <div class="reasoning-text markdown" aria-live="polite"></div>
+    </div>
+    <div class="answer-text markdown">Retrieving evidence and asking the local model...</div>
+    <div class="sources-panel" hidden>
+      <details class="sources-details">
+        <summary class="sources-summary">Evidence in View (<span class="sources-count">0</span>)</summary>
+        <div class="sources-list"></div>
+      </details>
+    </div>
+    <small class="citation-note"></small>
+  `;
+  messagesContainer.appendChild(pending);
+
+  const reasoningBlock = pending.querySelector('.reasoning'),
+        reasoningText = pending.querySelector('.reasoning-text'),
+        answerText = pending.querySelector('.answer-text'),
+        sourcesPanel = pending.querySelector('.sources-panel'),
+        sourcesList = pending.querySelector('.sources-list'),
+        sourcesCount = pending.querySelector('.sources-count'),
+        citationNote = pending.querySelector('.citation-note');
+
+  let reasoningRaw = '', answerRaw = '';
+  messagesContainer.scrollTop = messagesContainer.scrollHeight;
+
+  try {
+    const response = await fetch('/chat/stream', {
+      method: 'POST',
+      headers: {'content-type': 'application/json'},
+      body: JSON.stringify({
+        message: text,
+        thinking: thinkingCheckbox.checked,
+        context: context
+      })
+    });
+    if(!response.ok) throw new Error((await response.json()).detail || 'Chat unavailable');
+    if(!response.body) throw new Error('Streaming is unavailable');
+
+    const reader = response.body.getReader(), decoder = new TextDecoder();
+    let buffer = '', finalData = null;
+
+    const handleEvent = raw => {
+      const line = raw.split('\n').find(item => item.startsWith('data:'));
+      if(!line) return;
+      const data = JSON.parse(line.slice(5).trim());
+
+      if(data.type === 'reasoning'){
+        reasoningBlock.hidden = false;
+        reasoningRaw += data.content || '';
+        reasoningText.innerHTML = renderMarkdown(reasoningRaw);
+      } else if(data.type === 'token'){
+        answerRaw += data.content || '';
+        answerText.innerHTML = renderMarkdown(answerRaw);
+      } else if(data.type === 'vault_proposal'){
+        pending.appendChild(renderProposalCard(data.proposal));
+        updatePendingBadge();
+      } else if(data.type === 'done'){
+        finalData = data;
+      } else if(data.type === 'error'){
+        throw new Error(data.detail || 'Chat unavailable');
+      }
+      messagesContainer.scrollTop = messagesContainer.scrollHeight;
+    };
+
+    while(true){
+      const chunk = await reader.read();
+      buffer += decoder.decode(chunk.value || new Uint8Array(), {stream: !chunk.done});
+      let boundary;
+      while((boundary = buffer.indexOf('\n\n')) >= 0){
+        handleEvent(buffer.slice(0, boundary));
+        buffer = buffer.slice(boundary + 2);
+      }
+      if(chunk.done) break;
+    }
+    if(buffer.trim()) handleEvent(buffer);
+    if(!finalData) throw new Error('The model stream ended before completion');
+
+    if(finalData.sources && finalData.sources.length){
+      sourcesPanel.hidden = false;
+      sourcesCount.textContent = finalData.sources.length;
+      sourcesList.innerHTML = finalData.sources.map(s => `
+        <div class="source-card">
+          <div class="source-header">
+            <span class="source-badge">${escapeHtml(s.citation_id)}</span>
+            <span class="source-title">${escapeHtml(s.title||s.relative_path)}</span>
+            <span class="source-meta">${escapeHtml(s.relative_path)}${s.heading_path?' · '+escapeHtml(s.heading_path):''}</span>
+          </div>
+          <pre class="source-content">${escapeHtml(s.content)}</pre>
+        </div>
+      `).join('');
+    }
+
+    if(!finalData.sources || !finalData.sources.length){
+      citationNote.textContent = 'Answered without vault sources';
+    } else if(finalData.citation_valid && finalData.citations && finalData.citations.length){
+      citationNote.textContent = 'Verified citations: ' + finalData.citations.join(', ');
+    } else if(finalData.citation_valid){
+      citationNote.textContent = 'Vault sources consulted';
+    } else {
+      citationNote.textContent = '⚠️ Citation review required (unverified claims or missing citations)';
+    }
+  } catch(e){
+    pending.remove();
+    errorEl.textContent = e.message;
+    errorEl.hidden = false;
+  }
+});
+
+promptInput.addEventListener('keydown', event => {
+  if(event.key === 'Enter' && !event.shiftKey){
+    event.preventDefault();
+    form.requestSubmit();
+  }
+});
+
 loadChatHistory();
-if(newChatBtn){newChatBtn.addEventListener('click',async()=>{try{await fetch('/chat/new',{method:'POST'});messages.innerHTML='<div class="message assistant"><span class="label">TINY BRAIN</span><p>Ask about an indexed note or idea. Vault claims include citations; new drafts are clearly labeled.</p></div>';prompt.focus();}catch(e){}});}
-form.addEventListener('submit',async event=>{event.preventDefault();error.hidden=true;const text=prompt.value.trim();if(!text)return;messages.insertAdjacentHTML('beforeend',`<div class="message user"><span class="label">YOU</span><p>${escapeHtml(text)}</p></div>`);prompt.value='';const pending=document.createElement('div');pending.className='message assistant';pending.innerHTML='<span class="label">TINY BRAIN</span><div class="reasoning" hidden><span class="label">MODEL REASONING</span><div class="reasoning-text markdown" aria-live="polite"></div></div><div class="answer-text markdown">Retrieving evidence and asking the local model...</div><div class="sources-panel" hidden><details class="sources-details"><summary class="sources-summary">Evidence in View (<span class="sources-count">0</span>)</summary><div class="sources-list"></div></details></div><small class="citation-note"></small>';messages.appendChild(pending);const reasoningBlock=pending.querySelector('.reasoning'),reasoningText=pending.querySelector('.reasoning-text'),answerText=pending.querySelector('.answer-text'),sourcesPanel=pending.querySelector('.sources-panel'),sourcesList=pending.querySelector('.sources-list'),sourcesCount=pending.querySelector('.sources-count'),citationNote=pending.querySelector('.citation-note');let reasoningRaw='',answerRaw='';messages.scrollTop=messages.scrollHeight;try{const response=await fetch('/chat/stream',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({message:text})});if(!response.ok)throw new Error((await response.json()).detail||'Chat unavailable');if(!response.body)throw new Error('Streaming is unavailable');const reader=response.body.getReader(),decoder=new TextDecoder();let buffer='',finalData=null;const handleEvent=raw=>{const line=raw.split('\n').find(item=>item.startsWith('data:'));if(!line)return;const data=JSON.parse(line.slice(5).trim());if(data.type==='reasoning'){reasoningBlock.hidden=false;reasoningRaw+=data.content||'';reasoningText.innerHTML=renderMarkdown(reasoningRaw);}else if(data.type==='token'){answerRaw+=data.content||'';answerText.innerHTML=renderMarkdown(answerRaw);}else if(data.type==='done'){finalData=data;}else if(data.type==='error'){throw new Error(data.detail||'Chat unavailable');}messages.scrollTop=messages.scrollHeight;};while(true){const chunk=await reader.read();buffer+=decoder.decode(chunk.value||new Uint8Array(),{stream:!chunk.done});let boundary;while((boundary=buffer.indexOf('\n\n'))>=0){handleEvent(buffer.slice(0,boundary));buffer=buffer.slice(boundary+2);}if(chunk.done)break;}if(buffer.trim())handleEvent(buffer);if(!finalData)throw new Error('The model stream ended before completion');if(finalData.sources&&finalData.sources.length){sourcesPanel.hidden=false;sourcesCount.textContent=finalData.sources.length;sourcesList.innerHTML=finalData.sources.map(s=>`<div class="source-card"><div class="source-header"><span class="source-badge">${escapeHtml(s.citation_id)}</span><span class="source-title">${escapeHtml(s.title||s.relative_path)}</span><span class="source-meta">${escapeHtml(s.relative_path)}${s.heading_path?' · '+escapeHtml(s.heading_path):''}</span></div><pre class="source-content">${escapeHtml(s.content)}</pre></div>`).join('');}if(!finalData.sources||!finalData.sources.length){citationNote.textContent='Answered without vault sources';}else if(finalData.citation_valid&&finalData.citations&&finalData.citations.length){citationNote.textContent='Verified citations: '+(finalData.citations||[]).join(', ');}else if(finalData.citation_valid){citationNote.textContent='Vault sources consulted';}else{citationNote.textContent='⚠️ Citation review required (unverified claims or missing citations)';}}catch(e){pending.remove();error.textContent=e.message;error.hidden=false;}});
-</script><style>.draft-review{margin-top:16px;padding:14px;background:#f0f4e3;border:1px solid var(--line)}.draft-review p{margin:0 0 10px}.draft-review label{display:block;color:var(--muted);font-family:'DM Mono',monospace;font-size:11px;letter-spacing:.08em;text-transform:uppercase}.draft-review input{display:block;width:100%;margin-top:6px}.draft-review .actions{display:flex;gap:10px;margin-top:12px}.draft-review button{margin-top:0}.draft-review .draft-status{color:var(--muted)}</style><script>
-function cleanDraft(value){return String(value).replace(/^(?:\s*#\s+Draft note\s*)+/i,'').replace(/\s*Not saved; approval is required to add this to the vault\.?\s*$/i,'').trim()+'\n';}
-function defaultDraftPath(topic){const title=String(topic||'Draft note').replace(/[\\/:*?"<>|]/g,'').replace(/\s+/g,' ').trim().slice(0,120)||'Draft note';return title.toLowerCase().endsWith('.md')?title:title+'.md';}
-function findDraftAssistant(userText){const users=[...document.querySelectorAll('.message.user')].filter(item=>item.querySelector('p')?.textContent===userText);const user=users[users.length-1];return user?.nextElementSibling?.classList.contains('assistant')?user.nextElementSibling:null;}
-function showDraftReview(userText, answer, data){const message=findDraftAssistant(userText);if(!message||message.querySelector('.draft-review'))return;const review=document.createElement('div');review.className='draft-review';review.innerHTML=`<p><strong>Draft ready for review.</strong> Nothing has been written yet.</p><label>Vault path<input value="${escapeHtml(defaultDraftPath(data.draft_topic))}" maxlength="500"></label><div class="actions"><button type="button" class="approve-draft">Approve &amp; save</button><button type="button" class="quiet decline-draft">Decline</button></div><small class="draft-status"></small>`;message.appendChild(review);const approve=review.querySelector('.approve-draft'),decline=review.querySelector('.decline-draft'),status=review.querySelector('.draft-status'),pathInput=review.querySelector('input');decline.addEventListener('click',()=>{approve.disabled=true;decline.disabled=true;status.textContent='Declined; nothing was written.';});approve.addEventListener('click',async()=>{approve.disabled=true;decline.disabled=true;let targetPath=pathInput.value.trim();if(!targetPath){status.textContent='Enter a vault path first.';approve.disabled=false;decline.disabled=false;return;}if(!/\.md$/i.test(targetPath))targetPath+='.md';try{const proposalResponse=await fetch('/changes',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({operation:'create_note',target_path:targetPath,proposed_content:cleanDraft(answer),description:'Add drafted note: '+(data.draft_topic||targetPath),reason:'Approved by the user from the Tiny Brain chat'})});const proposal=await proposalResponse.json();if(!proposalResponse.ok)throw new Error(proposal.detail||'Could not create proposal');const approvalResponse=await fetch('/changes/'+proposal.change_id+'/approve',{method:'POST'});const approval=await approvalResponse.json();if(!approvalResponse.ok)throw new Error(approval.detail||'Could not approve proposal');status.textContent='Saved to '+targetPath+' and committed to Git.';pathInput.disabled=true;}catch(error){status.textContent=error.message;approve.disabled=false;decline.disabled=false;}});}
-const originalTinyBrainFetch=window.fetch.bind(window);window.fetch=async function(input,init){const response=await originalTinyBrainFetch(input,init);const url=typeof input==='string'?input:input.url||'';if(url.endsWith('/chat/stream')){let requestBody={};try{requestBody=JSON.parse(init?.body||'{}');}catch(error){}response.clone().text().then(raw=>{let answer='',done=null;for(const block of raw.split(/\n\n/)){const line=block.split('\n').find(item=>item.startsWith('data:'));if(!line)continue;try{const data=JSON.parse(line.slice(5).trim());if(data.type==='token')answer+=data.content||'';if(data.type==='done')done=data;}catch(error){}}if(done?.draft_mode)showDraftReview(requestBody.message||'',answer,done);});}return response;};
-</script><style>.draft-review textarea{display:block;width:100%;min-height:90px;margin-top:8px;resize:vertical}.draft-review .suggestion-box{margin-top:12px}.draft-review .suggestion-box button{margin-top:10px}</style><script>
-function showDraftReview(userText, answer, data){const message=findDraftAssistant(userText);if(!message||message.querySelector('.draft-review'))return;let currentAnswer=answer;const review=document.createElement('div');review.className='draft-review';review.innerHTML=`<p><strong>Draft ready for review.</strong> Nothing has been written yet.</p><label>Vault path<input value="${escapeHtml(defaultDraftPath(data.draft_topic))}" maxlength="500"></label><div class="actions"><button type="button" class="approve-draft">Approve &amp; save</button><button type="button" class="quiet decline-draft">Decline</button><button type="button" class="quiet suggest-draft">Suggest edit</button></div><div class="suggestion-box" hidden><label>Suggested edit<textarea maxlength="4000" placeholder="e.g. Make the introduction shorter and add one concrete example."></textarea></label><button type="button" class="apply-suggestion">Apply suggestion</button></div><small class="draft-status"></small>`;message.appendChild(review);const approve=review.querySelector('.approve-draft'),decline=review.querySelector('.decline-draft'),suggest=review.querySelector('.suggest-draft'),apply=review.querySelector('.apply-suggestion'),status=review.querySelector('.draft-status'),pathInput=review.querySelector('input'),suggestionBox=review.querySelector('.suggestion-box'),suggestionInput=review.querySelector('textarea');decline.addEventListener('click',()=>{approve.disabled=true;decline.disabled=true;suggest.disabled=true;status.textContent='Declined; nothing was written.';});suggest.addEventListener('click',()=>{suggestionBox.hidden=false;suggestionInput.focus();});apply.addEventListener('click',async()=>{const suggestion=suggestionInput.value.trim();if(!suggestion){status.textContent='Enter a suggested edit first.';return;}approve.disabled=true;decline.disabled=true;suggest.disabled=true;apply.disabled=true;status.textContent='Revising the draft...';try{const response=await fetch('/chat/draft/revise',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({topic:data.draft_topic||'Draft note',draft:cleanDraft(currentAnswer),suggestion})});const revised=await response.json();if(!response.ok)throw new Error(revised.detail||'Could not revise draft');currentAnswer=revised.answer;message.querySelector('.answer-text').innerHTML=renderMarkdown(currentAnswer);suggestionInput.value='';suggestionBox.hidden=true;status.textContent='Revised draft ready for review.';}catch(error){status.textContent=error.message;}finally{approve.disabled=false;decline.disabled=false;suggest.disabled=false;apply.disabled=false;}});approve.addEventListener('click',async()=>{approve.disabled=true;decline.disabled=true;suggest.disabled=true;let targetPath=pathInput.value.trim();if(!targetPath){status.textContent='Enter a vault path first.';approve.disabled=false;decline.disabled=false;suggest.disabled=false;return;}if(!/\.md$/i.test(targetPath))targetPath+='.md';try{const proposalResponse=await fetch('/changes',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({operation:'create_note',target_path:targetPath,proposed_content:cleanDraft(currentAnswer),description:'Add drafted note: '+(data.draft_topic||targetPath),reason:'Approved by the user from the Tiny Brain chat'})});const proposal=await proposalResponse.json();if(!proposalResponse.ok)throw new Error(proposal.detail||'Could not create proposal');const approvalResponse=await fetch('/changes/'+proposal.change_id+'/approve',{method:'POST'});const approval=await approvalResponse.json();if(!approvalResponse.ok)throw new Error(approval.detail||'Could not approve proposal');status.textContent='Saved to '+targetPath+' and committed to Git.';pathInput.disabled=true;}catch(error){status.textContent=error.message;approve.disabled=false;decline.disabled=false;suggest.disabled=false;}});}
-</script><script>
-const contextAwareFetch=window.fetch.bind(window);window.fetch=async function(input,init){const url=typeof input==='string'?input:input.url||'';if(url.endsWith('/chat/stream')&&init?.body){try{const payload=JSON.parse(init.body),messages=[...document.querySelectorAll('.message.user,.message.assistant')].slice(0,-2),questions=messages.filter(item=>item.classList.contains('user')).map(item=>item.querySelector('p')?.textContent||'').filter(Boolean),answers=messages.filter(item=>item.classList.contains('assistant')).map(item=>item.querySelector('.answer-text')?.textContent||'').filter(Boolean).slice(-3),history=`Earlier user questions:\n${questions.map((text,index)=>`${index+1}. ${text}`).join('\n')}\n\nRecent assistant answers:\n${answers.map((text,index)=>`${index+1}. ${text}`).join('\n')}`;if(questions.length||answers.length)payload.context=history.slice(0,20000);init={...init,body:JSON.stringify(payload)};}catch(error){}}return contextAwareFetch(input,init);};
-</script><script>
-document.addEventListener('click',event=>{const button=event.target.closest('.approve-draft');if(!button)return;const status=button.closest('.draft-review')?.querySelector('.draft-status');if(status)status.textContent='Saving to the vault...';},true);
-</script><script>
-const thinkingAwareFetch=window.fetch.bind(window);window.fetch=async function(input,init){const url=typeof input==='string'?input:input.url||'';if(url.endsWith('/chat/stream')&&init?.body){try{const payload=JSON.parse(init.body);payload.thinking=thinking.checked;init={...init,body:JSON.stringify(payload)};}catch(error){}}return thinkingAwareFetch(input,init);};
-prompt.addEventListener('keydown',event=>{if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();form.requestSubmit();}});
-const vaultProposals=document.querySelector('#vault-proposals');
-function diffLineClass(line){if(line.startsWith('+++')||line.startsWith('---'))return 'meta';if(line.startsWith('@@'))return 'hunk';if(line.startsWith('+'))return 'add';if(line.startsWith('-'))return 'del';return 'ctx';}
-function setVaultStatus(card,text,isError){const status=card.querySelector('.vault-status');status.textContent=text;status.classList.toggle('error',Boolean(isError));}
-function lockVaultCard(card){card.querySelectorAll('button,textarea').forEach(item=>{item.disabled=true;});}
-function renderVaultProposal(view){const existing=vaultProposals.querySelector(`[data-change-id="${view.change_id}"]`);const card=document.createElement('div');card.className='vault-card';card.dataset.changeId=view.change_id;const diffHtml=view.diff.length?view.diff.map(line=>`<span class="diff-line ${diffLineClass(line)}">${escapeHtml(line)}</span>`).join(''):'<span class="diff-line ctx">No textual change.</span>';const truncated=view.diff_truncated?'<small class="vault-note">Diff truncated.</small>':'';card.innerHTML=`<p class="vault-title"><span class="vault-kind">${view.is_new?'New note':'Update'}</span> <code>${escapeHtml(view.target_path)}</code></p><p class="vault-reason">${escapeHtml(view.reason||'')}</p><details><summary>View diff</summary><pre class="diff">${diffHtml}</pre>${truncated}</details><div class="vault-actions"><button type="button" class="vault-accept">Accept</button><button type="button" class="vault-refuse quiet">Refuse</button><button type="button" class="vault-edit-toggle quiet">Propose edit</button></div><div class="vault-edit" hidden><textarea rows="3" maxlength="4000" placeholder="Describe the change you want"></textarea><button type="button" class="vault-edit-apply">Apply edit</button></div><small class="vault-status"></small>`;if(existing)existing.replaceWith(card);else vaultProposals.appendChild(card);card.querySelector('.vault-accept').addEventListener('click',async()=>{lockVaultCard(card);setVaultStatus(card,'Saving...');try{const response=await fetch(`/changes/${view.change_id}/approve`,{method:'POST'});const data=await response.json();if(!response.ok)throw new Error(data.detail||'Could not accept');card.remove();}catch(error){card.querySelectorAll('button,textarea').forEach(item=>{item.disabled=false;});setVaultStatus(card,error.message,true);}});card.querySelector('.vault-refuse').addEventListener('click',async()=>{lockVaultCard(card);try{const response=await fetch(`/changes/${view.change_id}/reject`,{method:'POST'});if(!response.ok)throw new Error('Could not refuse');card.remove();}catch(error){card.querySelectorAll('button,textarea').forEach(item=>{item.disabled=false;});setVaultStatus(card,error.message,true);}});const editBox=card.querySelector('.vault-edit');card.querySelector('.vault-edit-toggle').addEventListener('click',()=>{editBox.hidden=!editBox.hidden;if(!editBox.hidden)editBox.querySelector('textarea').focus();});card.querySelector('.vault-edit-apply').addEventListener('click',async()=>{const suggestion=editBox.querySelector('textarea').value.trim();if(!suggestion)return;const applyButton=card.querySelector('.vault-edit-apply');applyButton.disabled=true;setVaultStatus(card,'Revising proposal...');try{const response=await fetch(`/changes/${view.change_id}/revise`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({suggestion})});const data=await response.json();if(!response.ok)throw new Error(data.detail||'Could not revise');renderVaultProposal(data);}catch(error){applyButton.disabled=false;setVaultStatus(card,error.message,true);}});}
-const vaultProposalFetch=window.fetch.bind(window);
-window.fetch=async function(input,init){const response=await vaultProposalFetch(input,init);const url=typeof input==='string'?input:(input&&input.url)||'';if(url.endsWith('/chat/stream')){response.clone().text().then(raw=>{for(const block of raw.split(/\n\n/)){const line=block.split('\n').find(item=>item.startsWith('data:'));if(!line)continue;try{const data=JSON.parse(line.slice(5).trim());if(data.type==='vault_proposal')renderVaultProposal(data.proposal);}catch(error){}}}).catch(()=>{});}return response;};
-vaultProposalFetch('/vault-drafts').then(response=>response.json()).then(items=>items.forEach(item=>renderVaultProposal(item))).catch(()=>{});
-</script></body></html>
+updatePendingBadge();
+</script>
+</body>
+</html>
