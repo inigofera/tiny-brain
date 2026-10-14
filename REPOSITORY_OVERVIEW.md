@@ -74,7 +74,7 @@ The service depends on the healthy status of the `llama` service.
 The `llama` service executes local language model inference.
 The container runs the official llama.cpp server image.
 The server loads a quantized GGUF model from the models directory.
-The default configuration uses the Spark-X2.5 model in Q6 quantization.
+The default configuration uses the Gemma-4-E2B-it model in Q4_K_M quantization (`gemma-4-E2B-it-q4_k_m.gguf`).
 The service exposes an OpenAI-compatible HTTP interface on port 8080.
 A container health check monitors the HTTP health endpoint.
 

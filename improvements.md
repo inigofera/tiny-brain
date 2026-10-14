@@ -45,7 +45,7 @@ Right now, if `memory.extractor` or `vault_review` runs during or immediately af
 
 In Section 5.3, you note that `vault_review` produces unified diffs and proposals. 2B models are notoriously bad at generating accurate unified diffs (they miscount line numbers, hallucinate context lines, or subtly rewrite adjacent paragraphs).
 
-* **The Fix**: Never ask `Spark-X2.5-1.7B` to output a full note or a unified diff.
+* **The Fix**: Never ask `gemma-4-E2B` to output a full note or a unified diff.
 * Instead, since your chunker already splits notes into deterministic heading sections with unique IDs:
   1. Ask the LLM to output only the target `section_id`, an operation (`APPEND`, `REPLACE_SECTION`, or `CREATE_NOTE`), and the new Markdown paragraph.
   2. Have your Python `changes` module splice that paragraph into the original note text in memory and use Python's standard `difflib.unified_diff` to generate the exact diff for the database and UI.
@@ -82,7 +82,7 @@ The Intel i7-8550U has 4 physical cores and 8 threads, thermal-throttles quickly
 * **Prompt Caching (`--cache-reuse` / Slot Persistence)**:
   Ensure your `llama.cpp` server starts with `-np 1` (single parallel slot, since it's a single-user local system) and keep your System Prompt + Retrieved Context prefix strictly deterministic. If the system prompt never changes at the top of the message array, `llama.cpp`'s KV cache will reuse it in 0ms on every turn.
 * **Disable or Toggle "Thinking" Mode by Default**:
-  If `Spark-X2.5-1.7B` is generating a reasoning trace (`<think>...</think>`) before every answer, it is burning 100–300 output tokens before answering. Add a UI toggle ("Deep Think" vs "Fast Chat") that controls whether thinking is enabled, or restrict thinking only to complex `vault_review` operations.
+  If `gemma-4-E2B` is generating a reasoning trace (`<think>...</think>`) before every answer, it is burning 100–300 output tokens before answering. Add a UI toggle ("Deep Think" vs "Fast Chat") that controls whether thinking is enabled, or restrict thinking only to complex `vault_review` operations.
 * **Flash Attention & KV Cache Quantization**:
   Pass `-fa` (Flash Attention) and `-ctk q8_0 -ctv q8_0` to `llama.cpp` to reduce memory bandwidth pressure on long contexts.
 * **OpenVINO / SYCL on the Intel UHD 620 iGPU**:

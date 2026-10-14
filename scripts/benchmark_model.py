@@ -20,7 +20,7 @@ async def benchmark(base_url: str, model: str, prompt: str) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--base-url", default="http://127.0.0.1:8080/v1")
-    parser.add_argument("--model", default="Spark-X2.5-1.7B-Q6_K.gguf")
+    parser.add_argument("--model", default="gemma-4-E2B-it-q4_k_m.gguf")
     parser.add_argument("--prompt", default="Reply with one short sentence confirming local inference.")
     args = parser.parse_args()
     asyncio.run(benchmark(args.base_url, args.model, args.prompt))

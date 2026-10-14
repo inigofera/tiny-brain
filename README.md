@@ -14,7 +14,7 @@ Tiny Brain is tuned specifically for low-power home server hardware (Intel Core 
 
 | Component | Specification | Details |
 | :--- | :--- | :--- |
-| **Conversational Chat Model** | **Spark-X2.5-1.7B** | Quantized as **`Spark-X2.5-1.7B-Q6_K.gguf`** (Q6_K) |
+| **Conversational Chat Model** | **Gemma-4-E2B-it** | Quantized as **`gemma-4-E2B-it-q4_k_m.gguf`** (Q4_K_M) |
 | **Inference Engine** | **`llama.cpp` server** | Official Docker image (`ghcr.io/ggml-org/llama.cpp:server` / `server-vulkan`), OpenAI-compatible HTTP API on port 8080 |
 | **CPU / Hardware Tuning** | **4 Physical Threads (`-t 4`, `-tb 4`)** | Avoids hyperthreading L3 cache thrashing and thermal throttling on the i7-8550U |
 | **Context & KV Optimization** | **8,192 tokens** with **Flash Attention (`-fa on`)** and **`q8_0` KV cache** | Quantized KV cache (`-ctk q8_0 -ctv q8_0`) reduces memory footprint ~32x; bounded context (`TINY_BRAIN_CONTEXT_TOKENS=8192`) |
@@ -86,7 +86,7 @@ python -m tiny_brain.main
 
 - **Chat Model Benchmark**:
   ```powershell
-  python scripts/benchmark_model.py --base-url http://127.0.0.1:8080/v1 --model Spark-X2.5-1.7B-Q6_K.gguf
+  python scripts/benchmark_model.py --base-url http://127.0.0.1:8080/v1 --model gemma-4-E2B-it-q4_k_m.gguf
   ```
 - **Embedding Runtime Benchmark** (`fastembed` vs `sentence-transformers` on `BAAI/bge-small-en-v1.5`):
   ```powershell
@@ -101,15 +101,15 @@ python -m tiny_brain.main
 
 ## Deployment Outline
 
-1. **Host Discovery**: Inspect the target host (e.g. Intel NUC at `192.168.1.117`, user `inigo`) per `final_plan.md`; do not assume Docker, Caddy, Syncthing, storage, or models already exist.
+1. **Host Discovery**: Inspect the target host (e.g. Intel NUC at `192.168.1.117`, user `inigo`); verify Docker, storage paths, firewall, and device permissions before provisioning.
 2. **Directory Structure**: Create `/srv/tiny-brain/{vault,data,models,staging,compose}` on the host with the target UID/GID (`TINY_BRAIN_PUID`, `TINY_BRAIN_PGID`).
 3. **Safe Vault Extraction**: Copy the vault archive to staging, validate with `scripts/inspect_vault.py`, reject unsafe paths, and extract with `scripts/import_vault.py`.
 4. **Git Initialization**: Initialize Git in the canonical vault using `scripts/init_vault_git.py`, configure the deployment author, and create the initial import commit before enabling writes.
 5. **Environment Configuration**: Copy `deployment/compose.env.example` to `/srv/tiny-brain/compose/.env`, verify volume paths, and pin the `llama.cpp` server image digest/release.
-6. **Chat Model Installation**: Place the verified `Spark-X2.5-1.7B-Q6_K.gguf` in `/srv/tiny-brain/models/` and record its SHA-256 checksum in `model_metadata`.
+6. **Chat Model Installation**: Place the verified `gemma-4-E2B-it-q4_k_m.gguf` in `/srv/tiny-brain/models/` and record its SHA-256 checksum in `model_metadata`.
 7. **Start Stack**: Launch Docker Compose (`docker compose up -d`), trust Caddy's internal CA on client devices (`https://tiny-brain.home.arpa`) or connect via LAN HTTP (`http://192.168.1.117/`), and run the initial vault index.
 8. **Syncthing Pairing**: Pair Syncthing separately. Keep its web GUI bound to localhost (`127.0.0.1:8384`); do not expose it through Caddy.
-9. **Benchmark & Verify**: Benchmark `Spark-X2.5-1.7B-Q6_K.gguf` (`scripts/benchmark_model.py`) and the embedding runtimes (`scripts/benchmark_embeddings.py`) on representative notes before enabling automatic Inbox writes.
+9. **Benchmark & Verify**: Benchmark `gemma-4-E2B-it-q4_k_m.gguf` (`scripts/benchmark_model.py`) and the embedding runtimes (`scripts/benchmark_embeddings.py`) on representative notes before enabling automatic Inbox writes.
 10. **Backups**: Configure automated backups with `deployment/backup.sh` to produce independent vault, operational database, audit log, and Git bundle archives.
 
 ---
