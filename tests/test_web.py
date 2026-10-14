@@ -114,6 +114,27 @@ def test_chat_stream_passes_thinking_preference_to_model(tmp_path: Path):
     assert received["thinking"] is False
 
 
+def test_chat_stream_defaults_thinking_to_false(tmp_path: Path):
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    settings = Settings(vault, tmp_path / "data", tmp_path / "data/db.sqlite", tmp_path / "models", "http://127.0.0.1:9/v1", "model", "embed", "none", 8192, 4, "tiny-brain.test", True, .9, True, "127.0.0.1", 8000)
+    app = create_app(settings)
+    received: dict[str, object] = {}
+
+    class FakeLlama:
+        async def complete(self, messages, **kwargs):
+            return {"choices": [{"message": {"content": "NONE"}}]}
+
+        async def stream(self, messages, **kwargs):
+            received.update(kwargs)
+            yield StreamChunk(content="Direct answer")
+
+    app.state.llama = FakeLlama()
+    response = TestClient(app).post("/chat/stream", json={"message": "explain a concept"})
+    assert response.status_code == 200
+    assert received["thinking"] is False
+
+
 def test_general_question_ignores_partial_vault_match(tmp_path: Path):
     vault = tmp_path / "vault"
     vault.mkdir()

@@ -35,10 +35,10 @@
       </div>
       <form id="chat-form">
         <textarea id="prompt" maxlength="12000" placeholder="What do you want to find or draft?" required></textarea>
-        <label class="thinking-toggle">
-          <input id="thinking" type="checkbox" checked>
+        <label class="thinking-toggle" title="Toggle Fast Chat vs Deep Think">
+          <input id="thinking" type="checkbox">
           <span class="thinking-switch" aria-hidden="true"></span>
-          <span>Thinking</span>
+          <span id="thinking-mode-label">Fast Chat</span>
         </label>
         <button id="btn-submit" type="submit">Ask <span aria-hidden="true">↗</span></button>
       </form>
@@ -256,7 +256,14 @@ const form = document.querySelector('#chat-form'),
       thinkingCheckbox = document.querySelector('#thinking'),
       messagesContainer = document.querySelector('#messages'),
       errorEl = document.querySelector('#chat-error'),
-      newChatBtn = document.querySelector('#btn-new-chat');
+      newChatBtn = document.querySelector('#btn-new-chat'),
+      thinkingModeLabel = document.querySelector('#thinking-mode-label');
+
+if(thinkingCheckbox && thinkingModeLabel){
+  thinkingCheckbox.addEventListener('change', () => {
+    thinkingModeLabel.textContent = thinkingCheckbox.checked ? 'Deep Think' : 'Fast Chat';
+  });
+}
 
 function renderAssistantMessage(msg){
   const el = document.createElement('div');
