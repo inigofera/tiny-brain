@@ -196,3 +196,41 @@ def test_changes_endpoints_include_diff_and_conflict_support(tmp_path: Path):
     assert html_resp.status_code == 200
     assert "filter-tabs" in html_resp.text
     assert "View Diff / Proposed Content" in html_resp.text
+
+
+def test_chat_stream_includes_sources_in_done_event(tmp_path: Path):
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    (vault / "Guide.md").write_text("# Guide\nTiny Brain provides local grounding.\n", encoding="utf-8")
+    settings = Settings(vault, tmp_path / "data", tmp_path / "data/db.sqlite", tmp_path / "models", "http://127.0.0.1:9/v1", "model", "embed", "none", 8192, 4, "tiny-brain.test", True, .9, True, "127.0.0.1", 8000)
+    app = create_app(settings)
+    app.state.indexer.full_scan()
+
+    class FakeLlama:
+        async def complete(self, messages, **kwargs):
+            return {"choices": [{"message": {"content": "Guide"}}]}
+
+        async def stream(self, messages, **kwargs):
+            yield StreamChunk(content="According to [S1], Tiny Brain provides local grounding.")
+
+    app.state.llama = FakeLlama()
+    response = TestClient(app).post("/chat/stream", json={"message": "what does Guide say?", "thinking": False})
+    assert response.status_code == 200
+    raw_text = response.text
+    assert "data: " in raw_text
+
+    import json
+    done_payload = None
+    for line in raw_text.splitlines():
+        if line.startswith("data: "):
+            ev = json.loads(line[6:])
+            if ev.get("type") == "done":
+                done_payload = ev
+                break
+
+    assert done_payload is not None
+    assert "sources" in done_payload
+    assert len(done_payload["sources"]) >= 1
+    assert done_payload["sources"][0]["citation_id"] == "S1"
+    assert done_payload["sources"][0]["relative_path"] == "Guide.md"
+    assert "Tiny Brain provides local grounding" in done_payload["sources"][0]["content"]

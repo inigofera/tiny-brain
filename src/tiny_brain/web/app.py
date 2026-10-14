@@ -254,7 +254,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     proposal = await vault_proposal_for(request.message, answer, request.context)
                     if proposal is not None:
                         yield f"data: {json.dumps({'type': 'vault_proposal', 'proposal': proposal})}\n\n"
-                yield f"data: {json.dumps({'type': 'done', 'reasoning': ''.join(reasoning_parts), 'citation_valid': valid, 'citations': citations, 'draft_mode': draft_mode, 'draft_topic': draft_topic if draft_mode else None})}\n\n"
+                sources = [asdict(citation) for citation in answer_retrieval.citations]
+                yield f"data: {json.dumps({'type': 'done', 'reasoning': ''.join(reasoning_parts), 'citation_valid': valid, 'citations': citations, 'sources': sources, 'draft_mode': draft_mode, 'draft_topic': draft_topic if draft_mode else None})}\n\n"
             except Exception:
                 yield f"data: {json.dumps({'type': 'error', 'detail': 'local model is unavailable'})}\n\n"
 
