@@ -1,12 +1,17 @@
 from __future__ import annotations
 
 import json
+import logging
 import sqlite3
 from dataclasses import dataclass
 
+from ..vault.chunker import format_breadcrumb
 from .embeddings import EmbeddingProvider, EmbeddingUnavailable, cosine_similarity, pack_vector, unpack_vector
 from .lexical import search as lexical_search
 from .ranking import RankedHit, reciprocal_rank_fusion
+from .reranking import Reranker
+
+logger = logging.getLogger(__name__)
 
 SEMANTIC_MIN_SCORE = 0.75
 
@@ -43,9 +48,24 @@ class RetrievalResult:
 
 
 class Retriever:
-    def __init__(self, connection: sqlite3.Connection, embedding_provider: EmbeddingProvider | None = None):
+    def __init__(
+        self,
+        connection: sqlite3.Connection,
+        embedding_provider: EmbeddingProvider | None = None,
+        reranker: Reranker | None = None,
+        semantic_min_score: float | None = None,
+        reranker_min_score: float = -7.0,
+    ):
         self.connection = connection
         self.embedding_provider = embedding_provider
+        self.reranker = reranker
+        self.reranker_min_score = reranker_min_score
+        if semantic_min_score is not None:
+            self.semantic_min_score = semantic_min_score
+        elif reranker is not None:
+            self.semantic_min_score = 0.40
+        else:
+            self.semantic_min_score = SEMANTIC_MIN_SCORE
 
     def search(self, query: str, *, limit: int = 8, context_tokens: int = 4000) -> RetrievalResult:
         lexical = lexical_search(self.connection, query, limit=max(limit * 3, 20))
@@ -64,17 +84,37 @@ class Retriever:
         tag_matches = self._fetch_tag_matches(primary_note_ids, query, limit=max(limit * 2, 10))
 
         # Rank all channels in parallel via Reciprocal Rank Fusion with direct channels weighted above graph expansion
+        rrf_limit = max(limit * 3, 20) if self.reranker else max(limit * 2, 16)
         ranked = reciprocal_rank_fusion(
             lexical, semantic, backlinks, outgoing, tag_matches,
             weights=(1.0, 1.0, 0.5, 0.5, 0.5),
-            limit=max(limit * 2, 16),
+            limit=rrf_limit,
         )
+
+        if self.reranker and ranked:
+            candidate_texts = [
+                f"{format_breadcrumb(hit.relative_path, [h for h in hit.heading_path.split(' / ') if h])}\n{hit.content}"
+                for hit in ranked
+            ]
+            try:
+                scores = self.reranker.rerank(query, candidate_texts)
+                scored_hits = []
+                for hit, score in zip(ranked, scores):
+                    if score >= self.reranker_min_score:
+                        hit.score = score
+                        hit.reasons.append(f"cross-encoder: {score:.2f}")
+                        scored_hits.append(hit)
+                ranked = sorted(scored_hits, key=lambda item: item.score, reverse=True)
+            except Exception as exc:
+                logger.warning("reranker failed, falling back to RRF: %s", exc)
 
         selected: list[RankedHit] = []
         citations: list[Citation] = []
         used_tokens = 0
         for hit in ranked:
-            estimate = max(1, len(hit.content.split()))
+            breadcrumb = format_breadcrumb(hit.relative_path, [h for h in hit.heading_path.split(" / ") if h])
+            formatted_content = f"{breadcrumb}\n{hit.content}" if not hit.content.startswith("[Doc:") else hit.content
+            estimate = max(1, len(formatted_content.split()))
             if selected and used_tokens + estimate > context_tokens:
                 continue
             used_tokens += estimate
@@ -82,7 +122,7 @@ class Retriever:
             citations.append(Citation(
                 citation_id=f"S{len(citations) + 1}", section_id=hit.section_id,
                 relative_path=hit.relative_path, title=hit.title, heading_path=hit.heading_path,
-                content=hit.content, relationship=", ".join(hit.reasons) or "retrieved",
+                content=formatted_content, relationship=", ".join(hit.reasons) or "retrieved",
             ))
             if len(selected) >= limit:
                 break
@@ -111,7 +151,7 @@ class Retriever:
         scored = []
         for row in rows:
             score = cosine_similarity(query_vector, unpack_vector(row[5]))
-            if score >= SEMANTIC_MIN_SCORE:
+            if score >= self.semantic_min_score:
                 scored.append(RankedHit(row[0], row[1], row[2], " / ".join(json.loads(row[3])), row[4], score, ["semantic match"]))
         return sorted(scored, key=lambda item: item.score, reverse=True)[:limit]
 

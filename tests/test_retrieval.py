@@ -125,3 +125,96 @@ def test_spurious_single_word_matches_are_excluded(tmp_path: Path):
         # Should NOT match because neither "spanish" nor "parties" exist in the note
         assert not result.citations
 
+
+def test_breadcrumb_formatting_and_citation_header(tmp_path: Path):
+    from tiny_brain.vault.chunker import format_breadcrumb
+
+    assert format_breadcrumb("note.md") == "[Doc: note.md]"
+    assert format_breadcrumb("work/project.md", ["Overview"]) == "[Doc: work/project.md > Section: Overview]"
+    assert (
+        format_breadcrumb("tech/ai.md", ["Overview", "Pipeline", "Ingestion"])
+        == "[Doc: tech/ai.md > Section: Overview > Pipeline > Ingestion]"
+    )
+
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    (vault / "guide.md").write_text("# Guide\n## Installation\nRun pip install.\n## Usage\nRun tiny-brain.", encoding="utf-8")
+    database = Database(tmp_path / "db.sqlite")
+    database.migrate()
+    VaultIndexer(vault, database).full_scan()
+    with database.connect() as connection:
+        result = Retriever(connection).search("pip install", limit=3)
+        assert result.citations
+        top = result.citations[0]
+        assert top.content.startswith("[Doc: guide.md > Section: Guide > Installation]")
+        assert "[Doc: guide.md > Section: Guide > Installation]\n## Installation\nRun pip install." in top.content
+        assert "[Doc: guide.md > Section: Guide > Installation]" in result.context()
+
+
+def test_cross_encoder_reranking_promotes_relevant_candidate(tmp_path: Path):
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    # Both notes match "cache" in FTS5; keywords has higher frequency, distributed has deeper semantic value
+    (vault / "keywords.md").write_text("# Cache System\ncache hit and cache miss metrics in local cache.", encoding="utf-8")
+    (vault / "distributed.md").write_text("# Cache Architecture\nDistributed in-memory key-value cache layer across cluster nodes.", encoding="utf-8")
+    database = Database(tmp_path / "db.sqlite")
+    database.migrate()
+    VaultIndexer(vault, database).full_scan()
+
+    class StubReranker:
+        model_name = "test-reranker"
+
+        def rerank(self, query: str, documents: list[str]) -> list[float]:
+            # Give higher score to distributed caching document
+            return [9.5 if "distributed" in doc.lower() else -1.2 for doc in documents]
+
+    with database.connect() as connection:
+        # Without reranker, keywords.md ranks first due to BM25 term frequency of "cache"
+        standard_result = Retriever(connection).search("cache", limit=2)
+        assert standard_result.citations[0].relative_path == "keywords.md"
+
+        # With reranker, distributed.md is scored higher by cross-encoder and promoted to first!
+        reranked_result = Retriever(connection, reranker=StubReranker()).search("cache", limit=2)
+        assert reranked_result.citations[0].relative_path == "distributed.md"
+        assert "cross-encoder: 9.50" in reranked_result.citations[0].relationship
+
+
+def test_dynamic_threshold_when_reranker_provided(tmp_path: Path):
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    (vault / "medium_signal.md").write_text("# Architecture\nMicroservices and decoupled event handlers.", encoding="utf-8")
+    database = Database(tmp_path / "db.sqlite")
+    database.migrate()
+
+    class MediumSignalEmbedding:
+        model_name = "medium"
+        runtime = "test"
+        dimension = 2
+
+        def embed(self, texts: list[str]) -> list[list[float]]:
+            results = []
+            for text in texts:
+                if "dispatcher" in text.lower():
+                    results.append([1.0, 0.0])
+                else:
+                    results.append([0.55, 0.835164])
+            return results
+
+    VaultIndexer(vault, database, MediumSignalEmbedding()).full_scan()
+
+    class PassThroughReranker:
+        model_name = "passthrough"
+
+        def rerank(self, query: str, documents: list[str]) -> list[float]:
+            return [3.0 for _ in documents]
+
+    with database.connect() as connection:
+        # Without reranker, default cutoff is 0.75, so score 0.55 is discarded (no lexical overlap)
+        res_no_reranker = Retriever(connection, MediumSignalEmbedding()).search("asynchronous message dispatcher", limit=2)
+        assert not res_no_reranker.citations
+
+        # With reranker, dynamic cutoff is 0.40, allowing conceptual candidate to be reranked and included
+        res_with_reranker = Retriever(connection, MediumSignalEmbedding(), reranker=PassThroughReranker()).search("asynchronous message dispatcher", limit=2)
+        assert res_with_reranker.citations
+        assert res_with_reranker.citations[0].relative_path == "medium_signal.md"
+

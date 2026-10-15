@@ -44,6 +44,7 @@ from ..config import Settings
 from ..db import Database
 from ..memory.service import MemoryService
 from ..search.embeddings import FastEmbedProvider
+from ..search.reranking import FastEmbedReranker
 from ..search.retrieval import RetrievalResult, Retriever
 from ..vault.indexer import VaultIndexer, iter_markdown_paths
 from ..vault.paths import UnsafePath, resolve_vault_path
@@ -110,6 +111,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     database = Database(settings.database)
     database.migrate()
     embedding_provider = FastEmbedProvider(settings.embedding_model) if settings.embedding_runtime.lower() == "fastembed" else None
+    reranker = FastEmbedReranker(settings.reranker_model) if settings.reranker_enabled else None
     indexer = VaultIndexer(settings.vault_root, database, embedding_provider)
     audit = AuditLog(database, settings.data_root)
     changes = ChangeService(settings.vault_root, database, indexer, audit, GitService(settings.vault_root))
@@ -122,6 +124,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.database = database
     app.state.indexer = indexer
     app.state.embedding_provider = embedding_provider
+    app.state.reranker = reranker
     app.state.changes = changes
     app.state.llama = llama
     app.state.memory = memory
@@ -150,7 +153,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             return None
         try:
             with database.connect() as connection:
-                candidates = find_candidates(connection, embedding_provider, settings.vault_root, f"{question} {answer[:400]}", open_drafts())
+                candidates = find_candidates(connection, embedding_provider, settings.vault_root, f"{question} {answer[:400]}", open_drafts(), reranker=reranker)
                 titles = note_titles(connection)
             decision = await decide_vault_change(app.state.llama, build_review_messages(question, answer, context, candidates))
             if decision is None:
@@ -207,7 +210,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.post("/search")
     async def search(request: SearchRequest) -> dict[str, object]:
         with database.connect() as connection:
-            result = Retriever(connection, embedding_provider).search(request.query, limit=request.limit, context_tokens=request.context_tokens)
+            result = Retriever(connection, embedding_provider, reranker).search(request.query, limit=request.limit, context_tokens=request.context_tokens)
         return {"query": result.query, "omitted_tokens": result.omitted_tokens, "results": [
             {"citation_id": citation.citation_id, "path": citation.relative_path, "title": citation.title,
              "heading": citation.heading_path, "relationship": citation.relationship, "content": citation.content}
@@ -221,7 +224,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             record_chat_message(connection, session_id, "user", request.message)
         query = await plan_vault_search(app.state.llama, request.message)
         with database.connect() as connection:
-            retrieval = (Retriever(connection, embedding_provider).search(query, limit=8, context_tokens=settings.context_tokens // 2)
+            retrieval = (Retriever(connection, embedding_provider, reranker).search(query, limit=8, context_tokens=settings.context_tokens // 2)
                          if query else RetrievalResult("", (), (), 0))
             answer_retrieval = retrieval
             try:
@@ -250,7 +253,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             draft_topic = _draft_topic(request.context)
         retrieval_query = draft_topic if draft_request else await plan_vault_search(app.state.llama, request.message, request.context)
         with database.connect() as connection:
-            retrieval = (Retriever(connection, embedding_provider).search(retrieval_query, limit=8, context_tokens=settings.context_tokens // 2)
+            retrieval = (Retriever(connection, embedding_provider, reranker).search(retrieval_query, limit=8, context_tokens=settings.context_tokens // 2)
                          if retrieval_query else RetrievalResult("", (), (), 0))
         draft_mode = draft_request
         answer_retrieval = retrieval

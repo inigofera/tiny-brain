@@ -79,7 +79,11 @@ class VaultIndexer:
     def _replace_note(self, note: ParsedNote, sections: list[Section], modified_time: float) -> None:
         note_id = _note_id(note.relative_path)
         now = _now()
-        vectors = self.embedding_provider.embed([section.content for section in sections]) if self.embedding_provider else []
+        vectors = (
+            self.embedding_provider.embed([f"{section.breadcrumb}\n{section.content}" for section in sections])
+            if self.embedding_provider
+            else []
+        )
         if self.embedding_provider and len(vectors) != len(sections):
             raise RuntimeError("embedding provider returned an unexpected number of vectors")
         aliases = note.frontmatter.get("aliases", [])

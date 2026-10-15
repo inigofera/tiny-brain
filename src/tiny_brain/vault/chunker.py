@@ -2,8 +2,18 @@ from __future__ import annotations
 
 import hashlib
 from dataclasses import dataclass
+from pathlib import Path
+from typing import Sequence
 
 from .parser import ParsedNote
+
+
+def format_breadcrumb(relative_path: str, heading_path: Sequence[str] = ()) -> str:
+    path_name = Path(relative_path).as_posix()
+    clean_headings = [h.strip() for h in heading_path if h and h.strip()]
+    if clean_headings:
+        return f"[Doc: {path_name} > Section: {' > '.join(clean_headings)}]"
+    return f"[Doc: {path_name}]"
 
 
 @dataclass(frozen=True, slots=True)
@@ -20,10 +30,14 @@ class Section:
     token_estimate: int
     content_hash: str
 
+    @property
+    def breadcrumb(self) -> str:
+        return format_breadcrumb(self.relative_path, self.heading_path)
+
 
 def chunk_note(note: ParsedNote, *, max_chars: int = 6000, overlap_chars: int = 240) -> list[Section]:
-    boundaries = [heading.start for heading in note.headings]
-    starts = [0, *boundaries]
+    boundaries = sorted(set([0] + [heading.start for heading in note.headings]))
+    starts = boundaries
     ends = boundaries[1:] + [len(note.content)]
     sections: list[Section] = []
     heading_stack: list[tuple[int, str]] = []

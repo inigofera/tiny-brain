@@ -25,6 +25,9 @@ class Settings:
     app_port: int
     max_output_tokens: int = 4096
     llama_timeout: float = 300.0
+    reranker_model: str = "Xenova/ms-marco-MiniLM-L-6-v2"
+    reranker_enabled: bool = False
+    reranker_min_score: float = -7.0
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -48,6 +51,9 @@ class Settings:
             app_port=_positive_int("TINY_BRAIN_APP_PORT", 8000),
             max_output_tokens=_positive_int("TINY_BRAIN_MAX_OUTPUT_TOKENS", 4096),
             llama_timeout=_positive_float("TINY_BRAIN_LLAMA_TIMEOUT", 300.0),
+            reranker_model=os.getenv("TINY_BRAIN_RERANKER_MODEL", "Xenova/ms-marco-MiniLM-L-6-v2"),
+            reranker_enabled=_bool("TINY_BRAIN_RERANKER_ENABLED", False),
+            reranker_min_score=float(os.getenv("TINY_BRAIN_RERANKER_MIN_SCORE", "-7.0")),
         )
 
     def ensure_directories(self) -> None:

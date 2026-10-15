@@ -49,8 +49,15 @@ class ReviewDecision:
     content: str
 
 
-def find_candidates(connection: sqlite3.Connection, embedding_provider: EmbeddingProvider | None, vault_root: Path, query: str, drafts: Sequence[CandidateNote] = ()) -> list[CandidateNote]:
-    result = Retriever(connection, embedding_provider).search(query, limit=8, context_tokens=4000)
+def find_candidates(
+    connection: sqlite3.Connection,
+    embedding_provider: EmbeddingProvider | None,
+    vault_root: Path,
+    query: str,
+    drafts: Sequence[CandidateNote] = (),
+    reranker: Any = None,
+) -> list[CandidateNote]:
+    result = Retriever(connection, embedding_provider, reranker).search(query, limit=8, context_tokens=4000)
     candidates: list[CandidateNote] = list(drafts)
     retrieved = 0
     for citation in result.citations:
