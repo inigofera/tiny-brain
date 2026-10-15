@@ -279,8 +279,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             record_chat_message(connection, session_id, "user", request.message)
         query = await plan_vault_search(app.state.llama, request.message)
         with database.connect() as connection:
-            retrieval = (Retriever(connection, embedding_provider, reranker).search(query, limit=8, context_tokens=settings.context_tokens // 2)
-                         if query else RetrievalResult("", (), (), 0))
+            retrieval = (
+                Retriever(
+                    connection,
+                    embedding_provider,
+                    reranker,
+                    context_compression=settings.context_compression,
+                    max_compressed_sentences=settings.max_compressed_sentences,
+                ).search(query, limit=8, context_tokens=settings.context_tokens // 2)
+                if query
+                else RetrievalResult("", (), (), 0)
+            )
             answer_retrieval = retrieval
             try:
                 result = await ChatAgent(llama, settings.max_tool_loops).answer(
@@ -316,8 +325,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             draft_topic = _draft_topic(request.context)
         retrieval_query = draft_topic if draft_request else await plan_vault_search(app.state.llama, request.message, request.context)
         with database.connect() as connection:
-            retrieval = (Retriever(connection, embedding_provider, reranker).search(retrieval_query, limit=8, context_tokens=settings.context_tokens // 2)
-                         if retrieval_query else RetrievalResult("", (), (), 0))
+            retrieval = (
+                Retriever(
+                    connection,
+                    embedding_provider,
+                    reranker,
+                    context_compression=settings.context_compression,
+                    max_compressed_sentences=settings.max_compressed_sentences,
+                ).search(retrieval_query, limit=8, context_tokens=settings.context_tokens // 2)
+                if retrieval_query
+                else RetrievalResult("", (), (), 0)
+            )
         draft_mode = draft_request
         answer_retrieval = retrieval
         draft_prefix = "# Draft note\n\n"

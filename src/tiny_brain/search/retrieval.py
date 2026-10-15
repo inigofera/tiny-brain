@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import sqlite3
 from dataclasses import dataclass
 
@@ -14,6 +15,29 @@ from .reranking import Reranker
 logger = logging.getLogger(__name__)
 
 SEMANTIC_MIN_SCORE = 0.75
+_SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?])\s+(?=[A-Z0-9\"'`\[])")
+
+
+def split_into_sentences(text: str) -> list[str]:
+    clean = text.strip()
+    if clean.startswith("[Doc:"):
+        lines = clean.splitlines()
+        clean = "\n".join(lines[1:]).strip() if len(lines) > 1 else clean
+
+    results: list[str] = []
+    paragraphs = [p.strip() for p in clean.split("\n\n") if p.strip()]
+    for para in paragraphs:
+        lines = [line.strip() for line in para.splitlines() if line.strip()]
+        for line in lines:
+            if line.startswith(("- ", "* ", "> ", "#")) or re.match(r"^\d+\.\s", line):
+                results.append(line)
+            else:
+                sentences = _SENTENCE_SPLIT_RE.split(line)
+                for s in sentences:
+                    s = s.strip()
+                    if s:
+                        results.append(s)
+    return results
 
 
 @dataclass(frozen=True, slots=True)
@@ -55,17 +79,67 @@ class Retriever:
         reranker: Reranker | None = None,
         semantic_min_score: float | None = None,
         reranker_min_score: float = -7.0,
+        context_compression: bool = False,
+        max_compressed_sentences: int = 8,
     ):
         self.connection = connection
         self.embedding_provider = embedding_provider
         self.reranker = reranker
         self.reranker_min_score = reranker_min_score
+        self.context_compression = context_compression
+        self.max_compressed_sentences = max_compressed_sentences
         if semantic_min_score is not None:
             self.semantic_min_score = semantic_min_score
         elif reranker is not None:
             self.semantic_min_score = 0.40
         else:
             self.semantic_min_score = SEMANTIC_MIN_SCORE
+
+    def _compress_to_sentences(self, query: str, top_hits: list[RankedHit], limit: int) -> tuple[list[Citation], list[RankedHit]]:
+        records: list[tuple[int, int, str]] = []  # (hit_idx, sent_idx, sentence)
+        for hit_idx, hit in enumerate(top_hits):
+            sents = split_into_sentences(hit.content)
+            for sent_idx, sent in enumerate(sents):
+                records.append((hit_idx, sent_idx, sent))
+
+        if not records:
+            return [], []
+
+        if len(records) <= self.max_compressed_sentences or self.reranker is None:
+            selected_records = records[:self.max_compressed_sentences]
+        else:
+            texts = [r[2] for r in records]
+            scores = self.reranker.rerank(query, texts)
+            ranked_records = sorted(zip(records, scores), key=lambda x: x[1], reverse=True)
+            top_records = [item[0] for item in ranked_records[:self.max_compressed_sentences]]
+            # Re-sort to maintain original reading order: by hit_idx, then sent_idx
+            selected_records = sorted(top_records, key=lambda x: (x[0], x[1]))
+
+        # Group sentences by hit_idx
+        by_hit: dict[int, list[str]] = {}
+        for hit_idx, _, sent in selected_records:
+            by_hit.setdefault(hit_idx, []).append(sent)
+
+        citations: list[Citation] = []
+        selected_hits: list[RankedHit] = []
+        for hit_idx, sents in by_hit.items():
+            if len(citations) >= limit:
+                break
+            hit = top_hits[hit_idx]
+            breadcrumb = format_breadcrumb(hit.relative_path, [h for h in hit.heading_path.split(" / ") if h])
+            body = "\n".join(sents)
+            formatted_content = f"{breadcrumb}\n{body}"
+            selected_hits.append(hit)
+            citations.append(Citation(
+                citation_id=f"S{len(citations) + 1}",
+                section_id=hit.section_id,
+                relative_path=hit.relative_path,
+                title=hit.title,
+                heading_path=hit.heading_path,
+                content=formatted_content,
+                relationship=", ".join(hit.reasons + ["compressed"]),
+            ))
+        return citations, selected_hits
 
     def search(self, query: str, *, limit: int = 8, context_tokens: int = 4000) -> RetrievalResult:
         lexical = lexical_search(self.connection, query, limit=max(limit * 3, 20))
@@ -107,6 +181,20 @@ class Retriever:
                 ranked = sorted(scored_hits, key=lambda item: item.score, reverse=True)
             except Exception as exc:
                 logger.warning("reranker failed, falling back to RRF: %s", exc)
+
+        if self.context_compression and self.reranker and ranked:
+            try:
+                compressed_citations, compressed_hits = self._compress_to_sentences(query, ranked[:3], limit=limit)
+                if compressed_citations:
+                    used_tokens = sum(max(1, len(c.content.split())) for c in compressed_citations)
+                    return RetrievalResult(
+                        query,
+                        tuple(compressed_hits),
+                        tuple(compressed_citations),
+                        max(0, sum(max(1, len(hit.content.split())) for hit in ranked) - used_tokens),
+                    )
+            except Exception as exc:
+                logger.warning("Context compression failed, falling back to full sections: %s", exc)
 
         selected: list[RankedHit] = []
         citations: list[Citation] = []
