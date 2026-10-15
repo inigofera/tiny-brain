@@ -26,7 +26,7 @@ services:
     image: ${LLAMA_IMAGE:-ghcr.io/ggml-org/llama.cpp:server}
     restart: unless-stopped
     command: [
-      "-m", "/models/${TINY_BRAIN_CHAT_MODEL:-gemma-4-E2B-it-q4_k_m.gguf}",
+      "-m", "/models/${TINY_BRAIN_CHAT_MODEL:-gemma-4-E2B-it-q4_0.gguf}",
       "--host", "0.0.0.0",
       "--port", "8080",
       "-c", "${TINY_BRAIN_CONTEXT_TOKENS:-8192}",
@@ -37,7 +37,8 @@ services:
       "--lookup-ngram-min", "${LLAMA_LOOKUP_NGRAM_MIN:-2}",
       "-fa", "on",
       "-ctk", "q8_0",
-      "-ctv", "q8_0",
+      "-ctv", "f16",
+      "--repack",
       "-ngl", "${LLAMA_N_GPU_LAYERS:-0}",
       "--no-webui"
     ]

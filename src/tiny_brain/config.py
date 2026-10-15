@@ -43,7 +43,7 @@ class Settings:
             database=Path(os.getenv("TINY_BRAIN_DATABASE", str(data_root / "database.sqlite"))).expanduser(),
             model_root=Path(os.getenv("TINY_BRAIN_MODEL_ROOT", "./models")).expanduser(),
             llama_base_url=os.getenv("TINY_BRAIN_LLAMA_BASE_URL", "http://llama:8080/v1").rstrip("/"),
-            chat_model=os.getenv("TINY_BRAIN_CHAT_MODEL", "gemma-4-E2B-it-q4_k_m.gguf"),
+            chat_model=os.getenv("TINY_BRAIN_CHAT_MODEL", "gemma-4-E2B-it-q4_0.gguf"),
             embedding_model=os.getenv("TINY_BRAIN_EMBEDDING_MODEL", "BAAI/bge-small-en-v1.5"),
             embedding_runtime=os.getenv("TINY_BRAIN_EMBEDDING_RUNTIME", "unconfigured"),
             context_tokens=_positive_int("TINY_BRAIN_CONTEXT_TOKENS", 16384),
