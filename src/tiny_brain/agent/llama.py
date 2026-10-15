@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from typing import Any
@@ -19,6 +20,28 @@ class LlamaClient:
         self.model = model
         self.timeout = timeout
         self.max_tokens = max_tokens
+        self._last_active_time = time.time()
+        self._active_requests = 0
+
+    @property
+    def is_busy(self) -> bool:
+        return self._active_requests > 0
+
+    @property
+    def last_active_time(self) -> float:
+        return self._last_active_time
+
+    @property
+    def idle_seconds(self) -> float:
+        if self.is_busy:
+            return 0.0
+        return max(0.0, time.time() - self._last_active_time)
+
+    def is_idle(self, min_idle_seconds: float = 10.0) -> bool:
+        return not self.is_busy and self.idle_seconds >= min_idle_seconds
+
+    def touch_activity(self) -> None:
+        self._last_active_time = time.time()
 
     async def health(self) -> bool:
         try:
@@ -51,14 +74,19 @@ class LlamaClient:
         if not thinking:
             payload["reasoning_effort"] = "none"
             payload["chat_template_kwargs"] = {"enable_thinking": False}
-        async with httpx.AsyncClient(timeout=self.timeout) as client:
-            response = await client.post(
-                f"{self.base_url}/chat/completions",
-                json=payload,
-            )
-            response.raise_for_status()
-            return response.json()
-
+        self._active_requests += 1
+        self._last_active_time = time.time()
+        try:
+            async with httpx.AsyncClient(timeout=self.timeout) as client:
+                response = await client.post(
+                    f"{self.base_url}/chat/completions",
+                    json=payload,
+                )
+                response.raise_for_status()
+                return response.json()
+        finally:
+            self._active_requests = max(0, self._active_requests - 1)
+            self._last_active_time = time.time()
 
     async def stream(self, messages: list[dict[str, Any]], *, temperature: float = 0.2, max_tokens: int | None = None, reasoning_effort: str | None = None, thinking: bool = True) -> AsyncIterator[StreamChunk]:
         output_tokens = max_tokens or self.max_tokens
@@ -67,19 +95,25 @@ class LlamaClient:
             reasoning_effort = reasoning_effort or "none"
             payload["reasoning_effort"] = reasoning_effort
             payload["chat_template_kwargs"] = {"enable_thinking": False}
-        async with httpx.AsyncClient(timeout=self.timeout) as client:
-            async with client.stream(
-                "POST", f"{self.base_url}/chat/completions",
-                json=payload,
-            ) as response:
-                response.raise_for_status()
-                async for line in response.aiter_lines():
-                    if not line.startswith("data:") or line.strip() == "data: [DONE]":
-                        continue
-                    import json
-                    payload = json.loads(line[5:].strip())
-                    delta = payload.get("choices", [{}])[0].get("delta", {})
-                    reasoning = delta.get("reasoning_content") or delta.get("reasoning") or ""
-                    content = delta.get("content") or ""
-                    if reasoning or content:
-                        yield StreamChunk(str(reasoning), str(content))
+        self._active_requests += 1
+        self._last_active_time = time.time()
+        try:
+            async with httpx.AsyncClient(timeout=self.timeout) as client:
+                async with client.stream(
+                    "POST", f"{self.base_url}/chat/completions",
+                    json=payload,
+                ) as response:
+                    response.raise_for_status()
+                    async for line in response.aiter_lines():
+                        if not line.startswith("data:") or line.strip() == "data: [DONE]":
+                            continue
+                        import json
+                        chunk_data = json.loads(line[5:].strip())
+                        delta = chunk_data.get("choices", [{}])[0].get("delta", {})
+                        reasoning = delta.get("reasoning_content") or delta.get("reasoning") or ""
+                        content = delta.get("content") or ""
+                        if reasoning or content:
+                            yield StreamChunk(str(reasoning), str(content))
+        finally:
+            self._active_requests = max(0, self._active_requests - 1)
+            self._last_active_time = time.time()

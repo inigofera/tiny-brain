@@ -177,6 +177,20 @@ class Database:
                     created_at TEXT NOT NULL,
                     completed_at TEXT
                 );
+                CREATE TABLE IF NOT EXISTS post_chat_jobs (
+                    job_id TEXT PRIMARY KEY,
+                    job_type TEXT NOT NULL,
+                    session_id TEXT,
+                    payload_json TEXT NOT NULL,
+                    state TEXT NOT NULL DEFAULT 'pending',
+                    attempts INTEGER NOT NULL DEFAULT 0,
+                    error TEXT,
+                    created_at TEXT NOT NULL,
+                    started_at TEXT,
+                    completed_at TEXT
+                );
+                CREATE INDEX IF NOT EXISTS post_chat_jobs_state_idx ON post_chat_jobs(state, created_at);
+
                 CREATE TABLE IF NOT EXISTS model_metadata (
                     model_id TEXT PRIMARY KEY,
                     kind TEXT NOT NULL,

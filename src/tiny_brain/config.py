@@ -28,6 +28,8 @@ class Settings:
     reranker_model: str = "Xenova/ms-marco-MiniLM-L-6-v2"
     reranker_enabled: bool = False
     reranker_min_score: float = -7.0
+    async_post_chat: bool = False
+    post_chat_idle_seconds: float = 10.0
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -54,6 +56,8 @@ class Settings:
             reranker_model=os.getenv("TINY_BRAIN_RERANKER_MODEL", "Xenova/ms-marco-MiniLM-L-6-v2"),
             reranker_enabled=_bool("TINY_BRAIN_RERANKER_ENABLED", False),
             reranker_min_score=float(os.getenv("TINY_BRAIN_RERANKER_MIN_SCORE", "-7.0")),
+            async_post_chat=_bool("TINY_BRAIN_ASYNC_POST_CHAT", True),
+            post_chat_idle_seconds=_positive_float("TINY_BRAIN_POST_CHAT_IDLE_SECONDS", 10.0),
         )
 
     def ensure_directories(self) -> None:

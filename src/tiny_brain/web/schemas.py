@@ -14,6 +14,7 @@ class ChatRequest(BaseModel):
     session_id: str | None = Field(default=None, max_length=100)
     context: str | None = Field(default=None, max_length=20000)
     thinking: bool = False
+    sync_review: bool | None = None
 
 
 class DraftRevisionRequest(BaseModel):

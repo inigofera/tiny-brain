@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 import json
 import logging
 import re
@@ -39,11 +40,13 @@ from ..agent.vault_review import (
     strip_fence,
     validate_decision,
 )
+from ..agent.post_chat_worker import PostChatWorker
 from ..changes.audit import AuditLog
 from ..changes.git import GitService
 from ..changes.service import ChangeService
 from ..config import Settings
 from ..db import Database
+from ..memory.extractor import should_trigger_extraction
 from ..memory.service import MemoryService
 from ..search.embeddings import FastEmbedProvider
 from ..search.reranking import FastEmbedReranker
@@ -119,9 +122,27 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     changes = ChangeService(settings.vault_root, database, indexer, audit, GitService(settings.vault_root))
     memory = MemoryService(settings.vault_root, database, indexer, audit, enabled=settings.auto_inbox_enabled, threshold=settings.auto_inbox_confidence)
     llama = LlamaClient(settings.llama_base_url, settings.chat_model, timeout=settings.llama_timeout, max_tokens=settings.max_output_tokens)
-    templates = Jinja2Templates(directory=str(TEMPLATE_ROOT))
+    post_chat_worker = PostChatWorker(
+        database,
+        llama,
+        memory,
+        changes,
+        settings.vault_root,
+        embedding_provider,
+        reranker,
+        idle_threshold=settings.post_chat_idle_seconds,
+    )
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        if settings.async_post_chat:
+            post_chat_worker.start()
+        try:
+            yield
+        finally:
+            await post_chat_worker.stop()
 
-    app = FastAPI(title="Tiny Brain", version="0.1.0")
+    templates = Jinja2Templates(directory=str(TEMPLATE_ROOT))
+    app = FastAPI(title="Tiny Brain", version="0.1.0", lifespan=lifespan)
     app.state.settings = settings
     app.state.database = database
     app.state.indexer = indexer
@@ -130,6 +151,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.changes = changes
     app.state.llama = llama
     app.state.memory = memory
+    app.state.post_chat_worker = post_chat_worker
     app.mount("/static", StaticFiles(directory=str(Path(__file__).parent / "static")), name="static")
 
     def proposal_view(change_id: str) -> dict[str, object]:
@@ -249,6 +271,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 connection, session_id, "assistant", answer,
                 retrieval={"sources": sources_list, "citations": citations, "citation_valid": valid}
             )
+        is_sync_review = request.sync_review if request.sync_review is not None else not settings.async_post_chat
+        if not is_sync_review:
+            if should_trigger_extraction(request.message):
+                post_chat_worker.enqueue_memory_extraction(request.message, session_id=session_id)
+            if len(request.message) + len(answer) >= MIN_REVIEW_CHARS:
+                post_chat_worker.enqueue_vault_review(request.message, answer, request.context, session_id=session_id)
         return JSONResponse({"answer": answer, "reasoning": result.reasoning, "citations": citations, "citation_valid": valid,
                              "sources": sources_list})
 
@@ -299,6 +327,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                         yield f"data: {json.dumps({'type': 'token', 'content': chunk.content})}\n\n"
                 answer = "".join(answer_parts)
                 valid, citations = validate_answer(answer, answer_retrieval)
+                is_sync_review = request.sync_review if request.sync_review is not None else not settings.async_post_chat
                 if draft_mode and answer.strip():
                     clean_content = re.sub(r"^(?:\s*#\s+Draft note\s*)+", "", answer, flags=re.IGNORECASE).strip() + "\n"
                     topic = draft_topic or "Draft note"
@@ -319,10 +348,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                             reason="Drafted from conversation",
                         )
                         yield f"data: {json.dumps({'type': 'vault_proposal', 'proposal': proposal_view(change_id)})}\n\n"
-                elif not draft_mode:
+                elif not draft_mode and is_sync_review:
                     proposal = await vault_proposal_for(request.message, answer, request.context)
                     if proposal is not None:
                         yield f"data: {json.dumps({'type': 'vault_proposal', 'proposal': proposal})}\n\n"
+                elif not draft_mode and not is_sync_review:
+                    if should_trigger_extraction(request.message):
+                        post_chat_worker.enqueue_memory_extraction(request.message, session_id=session_id)
+                    if len(request.message) + len(answer) >= MIN_REVIEW_CHARS:
+                        post_chat_worker.enqueue_vault_review(request.message, answer, request.context, session_id=session_id)
                 sources = [asdict(citation) for citation in answer_retrieval.citations]
                 with database.connect() as connection:
                     record_chat_message(
@@ -334,6 +368,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 yield f"data: {json.dumps({'type': 'error', 'detail': 'local model is unavailable'})}\n\n"
 
         return StreamingResponse(events(), media_type="text/event-stream", headers={"Cache-Control": "no-cache"})
+
+    @app.get("/jobs")
+    async def list_jobs(limit: int = 50, state: str | None = None) -> list[dict[str, object]]:
+        return [asdict(job) for job in post_chat_worker.queue.list_jobs(limit=limit, state=state)]
 
     @app.get("/chat/history")
     async def chat_history() -> dict[str, object]:
