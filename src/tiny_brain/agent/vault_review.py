@@ -125,8 +125,11 @@ def build_review_messages(question: str, answer: str, context: str | None, candi
     return [{"role": "system", "content": VAULT_REVIEW_PROMPT}, {"role": "user", "content": user}]
 
 
-async def decide_vault_change(llama: LlamaClient, messages: list[dict[str, Any]]) -> ReviewDecision | None:
-    response = await llama.complete(messages, temperature=0.1, thinking=False)
+async def decide_vault_change(llama: LlamaClient, messages: list[dict[str, Any]], *, id_slot: int | None = None) -> ReviewDecision | None:
+    kwargs: dict[str, Any] = {"temperature": 0.1, "thinking": False}
+    if id_slot is not None:
+        kwargs["id_slot"] = id_slot
+    response = await llama.complete(messages, **kwargs)
     text = str(response.get("choices", [{}])[0].get("message", {}).get("content") or "")
     decision = parse_decision(text)
     if decision is None:

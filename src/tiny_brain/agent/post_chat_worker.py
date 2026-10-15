@@ -129,11 +129,11 @@ class PostChatWorker:
     async def _handle_memory_extraction(self, job: PostChatJob) -> None:
         message = job.payload.get("message", "")
         source_message_id = job.payload.get("source_message_id")
-        extractor = MemoryExtractor(self.llama)
+        extractor = MemoryExtractor(self.llama, id_slot=1)
         candidates = await extractor.extract(message, source_message_id=source_message_id)
         for candidate in candidates:
             self.memory.process(candidate)
-        logger.info("Background memory extraction processed %d candidates for job %s", len(candidates), job.job_id)
+        logger.info("Background memory extraction processed %d candidates for job %s (slot 1)", len(candidates), job.job_id)
 
     def _open_drafts(self) -> list[CandidateNote]:
         rows = self.changes.pending_with_description(REVIEW_DESCRIPTION_PREFIXES, MAX_OPEN_DRAFTS)
@@ -155,7 +155,7 @@ class PostChatWorker:
             )
             titles = note_titles(connection)
 
-        decision = await decide_vault_change(self.llama, build_review_messages(question, answer, context, candidates))
+        decision = await decide_vault_change(self.llama, build_review_messages(question, answer, context, candidates), id_slot=1)
         if decision is None:
             logger.info("Background vault review: no usable decision for job %s", job.job_id)
             return

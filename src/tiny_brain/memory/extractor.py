@@ -55,14 +55,16 @@ class MemoryExtractionError(ValueError):
 
 
 class MemoryExtractor:
-    def __init__(self, client: LlamaClient):
+    def __init__(self, client: LlamaClient, id_slot: int | None = None):
         self.client = client
+        self.id_slot = id_slot
 
-    async def extract(self, message: str, source_message_id: str | None = None) -> list[MemoryCandidate]:
+    async def extract(self, message: str, source_message_id: str | None = None, id_slot: int | None = None) -> list[MemoryCandidate]:
         # Stage 1: Deterministic gate
         if not should_trigger_extraction(message):
             return []
 
+        slot = id_slot if id_slot is not None else self.id_slot
         # Stage 2: GBNF Grammar constrained LLM invocation
         try:
             response = await self.client.complete(
@@ -74,6 +76,7 @@ class MemoryExtractor:
                 max_tokens=60,
                 grammar=MEMORY_GBNF_GRAMMAR,
                 thinking=False,
+                id_slot=slot,
             )
         except Exception as exc:
             # Fallback for clients/mocks that do not accept grammar parameter
@@ -84,6 +87,7 @@ class MemoryExtractor:
                         {"role": "user", "content": message},
                     ],
                     temperature=0.0,
+                    id_slot=slot,
                 )
             except Exception as inner:
                 raise MemoryExtractionError(f"model completion failed: {inner}") from inner
