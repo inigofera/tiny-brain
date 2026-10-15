@@ -12,6 +12,8 @@ from typing import Any
 
 from ..search.embeddings import EmbeddingProvider
 from ..search.retrieval import Retriever
+from ..vault.chunker import Section, chunk_note
+from ..vault.parser import parse_note
 from ..vault.paths import UnsafePath, is_indexable_markdown, resolve_vault_path
 from .llama import LlamaClient
 from .prompts import VAULT_REVIEW_PROMPT
@@ -38,6 +40,17 @@ class CandidateNote:
     path: str
     content: str
     change_id: str | None = None
+    sections: tuple[Section, ...] = ()
+
+
+def _ensure_sections(note: CandidateNote) -> tuple[Section, ...]:
+    if note.sections:
+        return note.sections
+    try:
+        parsed = parse_note(note.path, note.content)
+        return tuple(chunk_note(parsed))
+    except Exception:
+        return ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -47,6 +60,7 @@ class ReviewDecision:
     path: str
     reason: str
     content: str
+    section_id: str | None = None
 
 
 def find_candidates(
@@ -58,7 +72,10 @@ def find_candidates(
     reranker: Any = None,
 ) -> list[CandidateNote]:
     result = Retriever(connection, embedding_provider, reranker).search(query, limit=8, context_tokens=4000)
-    candidates: list[CandidateNote] = list(drafts)
+    candidates: list[CandidateNote] = [
+        replace(draft, sections=_ensure_sections(draft)) if not draft.sections else draft
+        for draft in drafts
+    ]
     retrieved = 0
     for citation in result.citations:
         if retrieved >= MAX_CANDIDATES:
@@ -77,13 +94,28 @@ def find_candidates(
         except (OSError, UnicodeDecodeError):
             continue
         if len(content) <= MAX_NOTE_CHARS:
-            candidates.append(CandidateNote(path, content))
+            parsed = parse_note(path, content)
+            sections = tuple(chunk_note(parsed))
+            candidates.append(CandidateNote(path, content, sections=sections))
             retrieved += 1
     return candidates
 
 
+def _format_candidate(item: CandidateNote) -> str:
+    tag = " (open draft)" if item.change_id else ""
+    header = f"### {item.path}{tag}"
+    sections = _ensure_sections(item)
+    if not sections:
+        return f"{header}\n{item.content}"
+    section_blocks = []
+    for s in sections:
+        heading = " > ".join(s.heading_path) if s.heading_path else "(top-level)"
+        section_blocks.append(f"  [Section ID: {s.section_id}] Heading: {heading}\n{s.content}")
+    return f"{header}\n" + "\n\n".join(section_blocks)
+
+
 def build_review_messages(question: str, answer: str, context: str | None, candidates: list[CandidateNote]) -> list[dict[str, Any]]:
-    notes = "\n\n".join(f"### {item.path}{' (open draft)' if item.change_id else ''}\n{item.content}" for item in candidates) or "[no related notes found]"
+    notes = "\n\n".join(_format_candidate(item) for item in candidates) or "[no related notes found]"
     user = (
         f"Conversation so far:\n{_clip(context or '[none]', MAX_CONTEXT_CHARS)}\n\n"
         f"Latest question: {question}\n\n"
@@ -113,25 +145,78 @@ def parse_decision(text: str) -> ReviewDecision | None:
         return None
     if not isinstance(data, dict):
         return None
-    action = _field(data, "action").lower()
+    action = (_field(data, "action") or _field(data, "operation")).lower()
     significance = _field(data, "significance").lower()
-    path = _field(data, "path")
-    content = strip_fence(_field(data, "content", strip=False)).strip()
-    if action == "create" and path and not path.lower().endswith(".md"):
+    path = _field(data, "path") or _field(data, "target_path")
+    section_id = _field(data, "section_id") or None
+    raw_content = _field(data, "paragraph", strip=False) or _field(data, "content", strip=False)
+    content = strip_fence(raw_content).strip()
+    if action in ("create", "create_note") and path and not path.lower().endswith(".md"):
         path += ".md"
-    return ReviewDecision(action, significance, path, _field(data, "reason")[:500], content + "\n" if content else "")
+    return ReviewDecision(
+        action=action,
+        significance=significance,
+        path=path,
+        reason=_field(data, "reason")[:500],
+        content=content + "\n" if content else "",
+        section_id=section_id,
+    )
+
+
+def splice_section_paragraph(
+    base: str,
+    sections: Sequence[Section],
+    operation: str,
+    section_id: str | None,
+    paragraph: str,
+) -> str:
+    """Deterministically splice a paragraph into the base note text."""
+    op = operation.lower().strip()
+    if op in ("create_note", "create"):
+        return paragraph.strip() + "\n"
+    if op == "update" and not section_id:
+        return paragraph
+
+    clean_paragraph = paragraph.strip()
+    if not clean_paragraph:
+        return base
+
+    target_section = next((s for s in sections if s.section_id == section_id), None) if section_id else None
+
+    if op in ("replace_section", "replace"):
+        if target_section is not None:
+            start = target_section.start_offset
+            end = target_section.end_offset
+            before = base[:start]
+            after = base[end:]
+            return before + clean_paragraph + ("\n" if not clean_paragraph.endswith("\n") else "") + after
+        return base.rstrip() + "\n\n" + clean_paragraph + "\n"
+
+    # Default: append
+    if target_section is not None:
+        end = target_section.end_offset
+        before = base[:end].rstrip()
+        after = base[end:].lstrip("\r\n")
+        separator = "\n\n" if before else ""
+        tail = ("\n\n" + after) if after else "\n"
+        return before + separator + clean_paragraph + tail
+
+    return base.rstrip() + "\n\n" + clean_paragraph + "\n"
 
 
 def validate_decision(decision: ReviewDecision, candidates: list[CandidateNote], vault_root: Path) -> str | None:
-    if decision.action not in {"update", "create"}:
+    valid_actions = {"update", "create", "create_note", "append", "replace_section"}
+    if decision.action not in valid_actions:
         return "no change proposed"
     if decision.significance not in {"medium", "high"}:
         return "change is not significant enough"
-    if decision.action == "update":
-        base = next((item.content for item in candidates if item.path == decision.path), None)
-        if base is None:
+    if decision.action in {"update", "append", "replace_section"}:
+        candidate = next((item for item in candidates if item.path == decision.path), None)
+        if candidate is None:
             return "update target is not a candidate note"
-        return check_content(base, decision.content, is_update=True)
+        sections = _ensure_sections(candidate)
+        spliced = splice_section_paragraph(candidate.content, sections, decision.action, decision.section_id, decision.content)
+        return check_content(candidate.content, spliced, is_update=True)
     if decision.path.split("/")[0] == RESERVED_PREFIX:
         return "new note path is reserved"
     try:

@@ -4,7 +4,7 @@ import json
 import logging
 import re
 import uuid
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -27,6 +27,7 @@ from ..agent.vault_review import (
     REVIEW_DESCRIPTION_PREFIXES,
     REVIEW_UPDATE_PREFIX,
     CandidateNote,
+    _ensure_sections,
     build_review_messages,
     check_content,
     decide_vault_change,
@@ -34,6 +35,7 @@ from ..agent.vault_review import (
     make_diff,
     normalize_decision,
     note_titles,
+    splice_section_paragraph,
     strip_fence,
     validate_decision,
 )
@@ -165,6 +167,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 logger.info("vault review: %s for %s (action=%s, significance=%s)", problem, decision.path, decision.action, decision.significance)
                 return None
             draft = next((item for item in candidates if item.change_id and item.path == decision.path), None)
+            candidate = next((item for item in candidates if item.path == decision.path), None)
+            if decision.action in ("append", "replace_section") and candidate is not None:
+                sections = _ensure_sections(candidate)
+                spliced_content = splice_section_paragraph(candidate.content, sections, decision.action, decision.section_id, decision.content)
+                decision = replace(decision, content=spliced_content, action="update")
+            elif decision.action == "create_note":
+                decision = replace(decision, action="create")
+
             if draft is not None:
                 changes.revise_pending(draft.change_id or "", decision.content)
                 logger.info("vault review: revised open draft %s", decision.path)
