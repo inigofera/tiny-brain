@@ -34,12 +34,12 @@ services:
       "-tb", "${LLAMA_THREADS_BATCH:-4}",
       "-np", "2",
       "--cache-reuse", "64",
-      "--lookup-ngram-min", "${LLAMA_LOOKUP_NGRAM_MIN:-2}",
+      "--spec-type", "ngram-mod",
       "-fa", "on",
       "-ctk", "q8_0",
       "-ctv", "f16",
       "--repack",
-      "--mlock",
+      "--load-mode", "mlock",
       "-ngl", "${LLAMA_N_GPU_LAYERS:-0}",
       "--no-webui"
     ]

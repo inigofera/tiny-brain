@@ -17,8 +17,10 @@ def test_compose_yaml_mlock_and_ulimits():
     parsed = yaml.safe_load(content)
     llama = parsed["services"]["llama"]
 
-    # 1. --mlock in command
-    assert "--mlock" in llama["command"]
+    # 1. --load-mode mlock in command
+    assert "--load-mode" in llama["command"]
+    idx = llama["command"].index("--load-mode")
+    assert llama["command"][idx + 1] == "mlock"
 
     # 2. memlock ulimits unlimited
     assert "ulimits" in llama

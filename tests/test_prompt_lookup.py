@@ -15,9 +15,9 @@ def test_compose_yaml_has_prompt_lookup_flag():
     parsed = yaml.safe_load(content)
     cmd = parsed["services"]["llama"]["command"]
 
-    assert "--lookup-ngram-min" in cmd
-    idx = cmd.index("--lookup-ngram-min")
-    assert "${LLAMA_LOOKUP_NGRAM_MIN:-2}" in cmd[idx + 1]
+    assert "--spec-type" in cmd
+    idx = cmd.index("--spec-type")
+    assert "ngram-mod" in cmd[idx + 1]
 
 
 @pytest.mark.asyncio
