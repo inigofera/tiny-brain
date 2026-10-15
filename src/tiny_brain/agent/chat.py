@@ -23,12 +23,21 @@ class ChatAgent:
         self.client = client
         self.max_tool_loops = max_tool_loops
 
-    async def answer(self, question: str, retrieval: RetrievalResult, tools: ReadTools | None = None, *, thinking: bool = True) -> ChatResult:
+    async def answer(
+        self,
+        question: str,
+        retrieval: RetrievalResult,
+        tools: ReadTools | None = None,
+        *,
+        thinking: bool = True,
+        context: str | None = None,
+    ) -> ChatResult:
+        messages: list[dict[str, Any]] = [{"role": "system", "content": SYSTEM_PROMPT}]
+        if context and context.strip() and context.strip() != "[none]":
+            messages.append({"role": "user", "content": f"Conversation history:\n{context.strip()}"})
+            messages.append({"role": "assistant", "content": "Understood. I will refer to this conversation context as needed."})
         user_content = f"Sources:\n{retrieval.context()}\n\nQuestion: {question}" if retrieval.citations else f"Question: {question}"
-        messages: list[dict[str, Any]] = [
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": user_content},
-        ]
+        messages.append({"role": "user", "content": user_content})
         errors: list[str] = []
         reasoning_parts: list[str] = []
         seen_tool_calls: set[str] = set()

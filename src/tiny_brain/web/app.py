@@ -77,6 +77,29 @@ def _conversation_context_for(message: str, context: str | None, *, draft_mode: 
     return context
 
 
+def build_chat_messages(
+    system_prompt: str,
+    question: str,
+    *,
+    rag_context: str = "",
+    conversation_context: str | None = None,
+    draft_mode: bool = False,
+    draft_prefix: str = "# Draft note\n\n",
+) -> list[dict[str, Any]]:
+    """Build chat messages with optimal ordering for KV cache reuse:
+    [Static System Prompt] -> [Chat History Turn 1..N] -> [Current Turn RAG Chunks] -> [User Query]
+    """
+    messages: list[dict[str, Any]] = [{"role": "system", "content": system_prompt}]
+    if conversation_context and conversation_context.strip() and conversation_context.strip() != "[none]":
+        messages.append({"role": "user", "content": f"Conversation history:\n{conversation_context.strip()}"})
+        messages.append({"role": "assistant", "content": "Understood. I will refer to this conversation context as needed."})
+    source_block = f"Vault sources:\n{rag_context.strip()}\n\n" if rag_context and rag_context.strip() else ""
+    messages.append({"role": "user", "content": f"{source_block}Current question: {question}"})
+    if draft_mode:
+        messages.append({"role": "assistant", "content": draft_prefix})
+    return messages
+
+
 def _draft_topic(message: str) -> str:
     match = re.search(r"\b(?:about|on|explain|describe|define)\s+(.+?)(?:\s+for\s+|\s+from\s+|\s+in\s+|\s+using\s+|[.;,]|$)", message, re.IGNORECASE)
     if match:
@@ -260,7 +283,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                          if query else RetrievalResult("", (), (), 0))
             answer_retrieval = retrieval
             try:
-                result = await ChatAgent(llama, settings.max_tool_loops).answer(request.message, answer_retrieval, tools=None, thinking=request.thinking)
+                result = await ChatAgent(llama, settings.max_tool_loops).answer(
+                    request.message, answer_retrieval, tools=None, thinking=request.thinking, context=request.context
+                )
                 answer = result.answer
             except Exception as exc:
                 raise HTTPException(status_code=503, detail="local model is unavailable") from exc
@@ -297,14 +322,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         answer_retrieval = retrieval
         draft_prefix = "# Draft note\n\n"
         conversation_context = _conversation_context_for(request.message, request.context, draft_mode=draft_mode)
-        source_block = f"Vault sources:\n{answer_retrieval.context()}\n\n" if answer_retrieval.citations else ""
-        user_content = f"{source_block}Conversation history:\n{conversation_context}\n\nCurrent question: {request.message}"
-        messages = [
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": user_content},
-        ]
-        if draft_mode:
-            messages.append({"role": "assistant", "content": draft_prefix})
+        source_block = answer_retrieval.context() if answer_retrieval.citations else ""
+        messages = build_chat_messages(
+            SYSTEM_PROMPT,
+            request.message,
+            rag_context=source_block,
+            conversation_context=conversation_context,
+            draft_mode=draft_mode,
+            draft_prefix=draft_prefix,
+        )
 
         async def events():
             answer_parts: list[str] = [draft_prefix] if draft_mode else []
