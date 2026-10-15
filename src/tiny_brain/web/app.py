@@ -144,7 +144,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     audit = AuditLog(database, settings.data_root)
     changes = ChangeService(settings.vault_root, database, indexer, audit, GitService(settings.vault_root))
     memory = MemoryService(settings.vault_root, database, indexer, audit, enabled=settings.auto_inbox_enabled, threshold=settings.auto_inbox_confidence)
-    llama = LlamaClient(settings.llama_base_url, settings.chat_model, timeout=settings.llama_timeout, max_tokens=settings.max_output_tokens)
+    llama = LlamaClient(
+        settings.llama_base_url,
+        settings.chat_model,
+        timeout=settings.llama_timeout,
+        max_tokens=settings.max_output_tokens,
+        lookup_ngram_min=settings.lookup_ngram_min,
+    )
     post_chat_worker = PostChatWorker(
         database,
         llama,

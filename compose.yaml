@@ -34,6 +34,7 @@ services:
       "-tb", "${LLAMA_THREADS_BATCH:-4}",
       "-np", "2",
       "--cache-reuse", "64",
+      "--lookup-ngram-min", "${LLAMA_LOOKUP_NGRAM_MIN:-2}",
       "-fa", "on",
       "-ctk", "q8_0",
       "-ctv", "q8_0",

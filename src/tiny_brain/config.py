@@ -32,6 +32,7 @@ class Settings:
     post_chat_idle_seconds: float = 10.0
     context_compression: bool = True
     max_compressed_sentences: int = 8
+    lookup_ngram_min: int = 2
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -62,6 +63,7 @@ class Settings:
             post_chat_idle_seconds=_positive_float("TINY_BRAIN_POST_CHAT_IDLE_SECONDS", 10.0),
             context_compression=_bool("TINY_BRAIN_CONTEXT_COMPRESSION", True),
             max_compressed_sentences=_positive_int("TINY_BRAIN_MAX_COMPRESSED_SENTENCES", 8),
+            lookup_ngram_min=_positive_int("TINY_BRAIN_LOOKUP_NGRAM_MIN", 2),
         )
 
     def ensure_directories(self) -> None:

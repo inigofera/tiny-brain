@@ -15,11 +15,12 @@ class StreamChunk:
 
 
 class LlamaClient:
-    def __init__(self, base_url: str, model: str, *, timeout: float = 300.0, max_tokens: int = 4096):
+    def __init__(self, base_url: str, model: str, *, timeout: float = 300.0, max_tokens: int = 4096, lookup_ngram_min: int | None = None):
         self.base_url = base_url.rstrip("/")
         self.model = model
         self.timeout = timeout
         self.max_tokens = max_tokens
+        self.lookup_ngram_min = lookup_ngram_min
         self._last_active_time = time.time()
         self._active_requests = 0
 
@@ -63,11 +64,15 @@ class LlamaClient:
         grammar: str | None = None,
         response_format: dict[str, Any] | None = None,
         id_slot: int | None = 0,
+        lookup_ngram_min: int | None = None,
     ) -> dict[str, Any]:
         output_tokens = max_tokens or self.max_tokens
         payload: dict[str, Any] = {"model": self.model, "messages": messages, "temperature": temperature, "stream": stream, "max_tokens": output_tokens}
         if id_slot is not None:
             payload["id_slot"] = id_slot
+        ngram_min = lookup_ngram_min if lookup_ngram_min is not None else self.lookup_ngram_min
+        if ngram_min is not None and ngram_min > 0:
+            payload["lookup_ngram_min"] = ngram_min
         if tools:
             payload["tools"] = tools
         if grammar:
@@ -91,11 +96,24 @@ class LlamaClient:
             self._active_requests = max(0, self._active_requests - 1)
             self._last_active_time = time.time()
 
-    async def stream(self, messages: list[dict[str, Any]], *, temperature: float = 0.2, max_tokens: int | None = None, reasoning_effort: str | None = None, thinking: bool = True, id_slot: int | None = 0) -> AsyncIterator[StreamChunk]:
+    async def stream(
+        self,
+        messages: list[dict[str, Any]],
+        *,
+        temperature: float = 0.2,
+        max_tokens: int | None = None,
+        reasoning_effort: str | None = None,
+        thinking: bool = True,
+        id_slot: int | None = 0,
+        lookup_ngram_min: int | None = None,
+    ) -> AsyncIterator[StreamChunk]:
         output_tokens = max_tokens or self.max_tokens
         payload: dict[str, Any] = {"model": self.model, "messages": messages, "temperature": temperature, "stream": True, "max_tokens": output_tokens}
         if id_slot is not None:
             payload["id_slot"] = id_slot
+        ngram_min = lookup_ngram_min if lookup_ngram_min is not None else self.lookup_ngram_min
+        if ngram_min is not None and ngram_min > 0:
+            payload["lookup_ngram_min"] = ngram_min
         if reasoning_effort is not None or not thinking:
             reasoning_effort = reasoning_effort or "none"
             payload["reasoning_effort"] = reasoning_effort
