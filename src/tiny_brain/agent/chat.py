@@ -31,6 +31,7 @@ class ChatAgent:
         *,
         thinking: bool = True,
         context: str | None = None,
+        max_tokens: int | None = None,
     ) -> ChatResult:
         messages: list[dict[str, Any]] = [{"role": "system", "content": SYSTEM_PROMPT}]
         if context and context.strip() and context.strip() != "[none]":
@@ -42,7 +43,12 @@ class ChatAgent:
         reasoning_parts: list[str] = []
         seen_tool_calls: set[str] = set()
         for _ in range(self.max_tool_loops + 1):
-            response = await self.client.complete(messages, tools=tools.schemas if tools else None, thinking=thinking)
+            response = await self.client.complete(
+                messages,
+                tools=tools.schemas if tools else None,
+                thinking=thinking,
+                max_tokens=max_tokens,
+            )
             message = response.get("choices", [{}])[0].get("message", {})
             messages.append(message)
             reasoning = message.get("reasoning_content") or message.get("reasoning") or ""

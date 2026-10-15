@@ -33,6 +33,7 @@ class Settings:
     context_compression: bool = True
     max_compressed_sentences: int = 8
     lookup_ngram_min: int = 2
+    fast_chat_max_tokens: int = 250
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -64,6 +65,7 @@ class Settings:
             context_compression=_bool("TINY_BRAIN_CONTEXT_COMPRESSION", True),
             max_compressed_sentences=_positive_int("TINY_BRAIN_MAX_COMPRESSED_SENTENCES", 8),
             lookup_ngram_min=_positive_int("TINY_BRAIN_LOOKUP_NGRAM_MIN", 2),
+            fast_chat_max_tokens=_positive_int("TINY_BRAIN_FAST_CHAT_MAX_TOKENS", 250),
         )
 
     def ensure_directories(self) -> None:

@@ -39,9 +39,14 @@ services:
       "-ctk", "q8_0",
       "-ctv", "f16",
       "--repack",
+      "--mlock",
       "-ngl", "${LLAMA_N_GPU_LAYERS:-0}",
       "--no-webui"
     ]
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
     devices:
       - /dev/dri:/dev/dri
     volumes:

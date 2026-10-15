@@ -297,9 +297,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 else RetrievalResult("", (), (), 0)
             )
             answer_retrieval = retrieval
+            chat_max_tokens = settings.max_output_tokens if request.thinking else settings.fast_chat_max_tokens
             try:
                 result = await ChatAgent(llama, settings.max_tool_loops).answer(
-                    request.message, answer_retrieval, tools=None, thinking=request.thinking, context=request.context
+                    request.message, answer_retrieval, tools=None, thinking=request.thinking, context=request.context, max_tokens=chat_max_tokens
                 )
                 answer = result.answer
             except Exception as exc:
@@ -362,10 +363,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             try:
                 if draft_mode:
                     yield f"data: {json.dumps({'type': 'token', 'content': draft_prefix})}\n\n"
+                stream_max_tokens = 1024 if draft_mode else (settings.max_output_tokens if request.thinking else settings.fast_chat_max_tokens)
                 async for chunk in app.state.llama.stream(
                     messages,
                     temperature=0.1 if draft_mode else 0.2,
-                    max_tokens=1024 if draft_mode else None,
+                    max_tokens=stream_max_tokens,
                     reasoning_effort="none" if draft_mode else None,
                     thinking=False if draft_mode else request.thinking,
                 ):
