@@ -48,8 +48,12 @@
           <div class="advanced-header-left">
             <span class="label">MODEL CONFIGURATION</span>
             {% if chat_model %}<span class="advanced-model-badge">{{ chat_model }}</span>{% endif %}
+            <span id="advanced-status-badge" class="advanced-status-badge">Auto-applied per turn</span>
           </div>
-          <button id="btn-reset-advanced" type="button" class="advanced-btn-sm" title="Reset all model configurations to defaults">Reset to Defaults</button>
+          <div class="advanced-header-actions">
+            <button id="btn-save-advanced" type="button" class="advanced-btn-save" title="Save and apply configuration for upcoming queries">Save &amp; Apply</button>
+            <button id="btn-reset-advanced" type="button" class="advanced-btn-sm" title="Reset all model configurations to defaults">Reset to Defaults</button>
+          </div>
         </div>
 
         <div class="advanced-grid">
@@ -327,7 +331,9 @@ const form = document.querySelector('#chat-form'),
       systemPromptInput = document.querySelector('#system-prompt'),
       promptCharCount = document.querySelector('#prompt-char-count'),
       btnResetPrompt = document.querySelector('#btn-reset-prompt'),
-      btnResetAdvanced = document.querySelector('#btn-reset-advanced');
+      btnResetAdvanced = document.querySelector('#btn-reset-advanced'),
+      btnSaveAdvanced = document.querySelector('#btn-save-advanced'),
+      advancedStatusBadge = document.querySelector('#advanced-status-badge');
 
 function updateCharCount(){
   if(promptCharCount && systemPromptInput){
@@ -336,6 +342,35 @@ function updateCharCount(){
     promptCharCount.textContent = `${len} chars${isCustom ? ' (custom)' : ''}`;
     promptCharCount.style.color = isCustom ? 'var(--coral)' : 'var(--muted)';
   }
+}
+
+function saveAdvancedSettings(showFeedback = true){
+  try{
+    if(systemPromptInput) localStorage.setItem('tiny_brain_custom_system_prompt', systemPromptInput.value);
+    if(thinkingCheckbox) localStorage.setItem('tiny_brain_thinking', thinkingCheckbox.checked ? 'true' : 'false');
+    if(contextWindowInput) localStorage.setItem('tiny_brain_context_window', contextWindowInput.value);
+    if(reasoningBudgetInput) localStorage.setItem('tiny_brain_reasoning_budget', reasoningBudgetInput.value);
+    if(temperatureInput) localStorage.setItem('tiny_brain_temperature', temperatureInput.value);
+  }catch(e){}
+
+  if(showFeedback && advancedStatusBadge && btnSaveAdvanced){
+    btnSaveAdvanced.textContent = '✓ Saved!';
+    btnSaveAdvanced.classList.add('saved');
+    advancedStatusBadge.textContent = '✓ Applied for next prompt';
+    advancedStatusBadge.classList.add('highlight');
+    setTimeout(() => {
+      btnSaveAdvanced.textContent = 'Save & Apply';
+      btnSaveAdvanced.classList.remove('saved');
+      advancedStatusBadge.textContent = 'Auto-applied per turn';
+      advancedStatusBadge.classList.remove('highlight');
+    }, 2500);
+  }
+}
+
+if(btnSaveAdvanced){
+  btnSaveAdvanced.addEventListener('click', () => {
+    saveAdvancedSettings(true);
+  });
 }
 
 if(systemPromptInput){
@@ -371,6 +406,14 @@ if(btnResetAdvanced){
       localStorage.removeItem('tiny_brain_reasoning_budget');
       localStorage.removeItem('tiny_brain_temperature');
     }catch(e){}
+    if(advancedStatusBadge){
+      advancedStatusBadge.textContent = 'Defaults restored';
+      advancedStatusBadge.classList.add('highlight');
+      setTimeout(() => {
+        advancedStatusBadge.textContent = 'Auto-applied per turn';
+        advancedStatusBadge.classList.remove('highlight');
+      }, 2000);
+    }
   });
 }
 

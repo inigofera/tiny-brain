@@ -50,4 +50,10 @@
 .config-control .thinking-toggle{height:38px;border-radius:2px;background:var(--panel)}
 .advanced-btn-sm{font-family:'DM Mono',monospace;font-size:11px;padding:3px 10px;height:26px;background:transparent;color:var(--muted);border:1px solid var(--line);cursor:pointer;border-radius:2px}
 .advanced-btn-sm:hover{background:var(--panel);color:var(--ink);border-color:var(--ink)}
+.advanced-header-actions{display:flex;align-items:center;gap:8px}
+.advanced-btn-save{font-family:'DM Mono',monospace;font-size:11px;font-weight:600;padding:4px 12px;height:28px;background:var(--ink);color:var(--panel);border:1px solid var(--ink);cursor:pointer;border-radius:2px;transition:background .15s ease}
+.advanced-btn-save:hover{background:var(--coral);border-color:var(--coral)}
+.advanced-btn-save.saved{background:#2c5a1c;border-color:#2c5a1c;color:#fff}
+.advanced-status-badge{font-family:'DM Mono',monospace;font-size:10px;color:var(--muted);background:var(--panel);border:1px solid var(--line);padding:2px 8px;border-radius:2px;transition:all .2s ease}
+.advanced-status-badge.highlight{background:var(--acid);color:var(--ink);border-color:var(--ink);font-weight:600}
 

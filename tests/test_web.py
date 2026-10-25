@@ -404,6 +404,7 @@ def test_home_renders_advanced_mode_and_model_configs(tmp_path: Path):
     assert 'id="temperature"' in html
     assert 'id="system-prompt"' in html
     assert 'id="thinking"' in html
+    assert 'id="btn-save-advanced"' in html
     assert "gemma-test-model.gguf" in html
     assert "REASONING MODE" in html
 
