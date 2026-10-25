@@ -15,6 +15,11 @@ class ChatRequest(BaseModel):
     context: str | None = Field(default=None, max_length=20000)
     thinking: bool = False
     sync_review: bool | None = None
+    system_prompt: str | None = Field(default=None, max_length=10000)
+    context_tokens: int | None = Field(default=None, ge=100, le=64000)
+    reasoning_budget: int | None = Field(default=None, ge=1, le=32000)
+    temperature: float | None = Field(default=None, ge=0.0, le=2.0)
+    reasoning_effort: str | None = Field(default=None, max_length=20)
 
 
 class DraftRevisionRequest(BaseModel):

@@ -35,13 +35,73 @@
       </div>
       <form id="chat-form">
         <textarea id="prompt" maxlength="12000" placeholder="What do you want to find or draft?" required></textarea>
-        <label class="thinking-toggle" title="Toggle Fast Chat vs Deep Think">
-          <input id="thinking" type="checkbox">
-          <span class="thinking-switch" aria-hidden="true"></span>
-          <span id="thinking-mode-label">Fast Chat</span>
+        <label class="advanced-toggle" title="Toggle Advanced Mode configurations">
+          <input id="advanced-mode" type="checkbox">
+          <span class="advanced-switch" aria-hidden="true"></span>
+          <span id="advanced-mode-label">Advanced</span>
         </label>
         <button id="btn-submit" type="submit">Ask <span aria-hidden="true">↗</span></button>
       </form>
+
+      <div id="advanced-panel" class="advanced-panel" hidden>
+        <div class="advanced-header">
+          <div class="advanced-header-left">
+            <span class="label">MODEL CONFIGURATION</span>
+            {% if chat_model %}<span class="advanced-model-badge">{{ chat_model }}</span>{% endif %}
+          </div>
+          <button id="btn-reset-advanced" type="button" class="advanced-btn-sm" title="Reset all model configurations to defaults">Reset to Defaults</button>
+        </div>
+
+        <div class="advanced-grid">
+          <div class="config-group">
+            <span class="config-label">REASONING MODE</span>
+            <div class="config-control">
+              <label class="thinking-toggle" title="Toggle Fast Chat vs Deep Think">
+                <input id="thinking" type="checkbox">
+                <span class="thinking-switch" aria-hidden="true"></span>
+                <span id="thinking-mode-label">Fast Chat</span>
+              </label>
+            </div>
+            <small class="config-hint">Fast Chat disables thinking tokens (~0s wait). Deep Think enables full reasoning traces.</small>
+          </div>
+
+          <div class="config-group">
+            <label class="config-label" for="context-window">CONTEXT WINDOW (TOKENS)</label>
+            <div class="config-control">
+              <input id="context-window" class="config-input" type="number" min="512" max="32768" step="512" value="{{ default_context_tokens }}" placeholder="{{ default_context_tokens }}">
+            </div>
+            <small class="config-hint">Total context token budget for retrieved notes &amp; history (default: {{ default_context_tokens }}).</small>
+          </div>
+
+          <div class="config-group">
+            <label class="config-label" for="reasoning-budget">REASONING BUDGET (TOKENS)</label>
+            <div class="config-control">
+              <input id="reasoning-budget" class="config-input" type="number" min="64" max="8192" step="64" placeholder="Auto (Fast: {{ default_fast_chat_max_tokens }}, Deep: {{ default_max_output_tokens }})">
+            </div>
+            <small class="config-hint">Max output tokens for generation &amp; reasoning. Leave blank for auto.</small>
+          </div>
+
+          <div class="config-group">
+            <label class="config-label" for="temperature">TEMPERATURE</label>
+            <div class="config-control">
+              <input id="temperature" class="config-input" type="number" min="0.0" max="1.5" step="0.05" value="0.2" placeholder="0.2">
+            </div>
+            <small class="config-hint">Sampling randomness: lower is deterministic &amp; grounded, higher is creative.</small>
+          </div>
+
+          <div class="config-group full-width">
+            <div class="config-header-row">
+              <label class="config-label" for="system-prompt">SYSTEM PROMPT</label>
+              <button id="btn-reset-prompt" type="button" class="advanced-btn-sm" title="Reset system prompt to default">Reset Prompt</button>
+            </div>
+            <textarea id="system-prompt" class="config-textarea" rows="4" maxlength="10000" placeholder="System instructions for Tiny Brain...">{{ default_system_prompt }}</textarea>
+            <div class="config-footer-row">
+              <small class="config-hint">Defines model persona, boundaries, and citation rules for the Obsidian vault.</small>
+              <small id="prompt-char-count" class="config-hint">0 chars</small>
+            </div>
+          </div>
+        </div>
+      </div>
       <p id="chat-error" class="error" hidden></p>
     </section>
 
@@ -257,13 +317,119 @@ const form = document.querySelector('#chat-form'),
       messagesContainer = document.querySelector('#messages'),
       errorEl = document.querySelector('#chat-error'),
       newChatBtn = document.querySelector('#btn-new-chat'),
-      thinkingModeLabel = document.querySelector('#thinking-mode-label');
+      thinkingModeLabel = document.querySelector('#thinking-mode-label'),
+      advancedModeCheckbox = document.querySelector('#advanced-mode'),
+      advancedModeLabel = document.querySelector('#advanced-mode-label'),
+      advancedPanel = document.querySelector('#advanced-panel'),
+      contextWindowInput = document.querySelector('#context-window'),
+      reasoningBudgetInput = document.querySelector('#reasoning-budget'),
+      temperatureInput = document.querySelector('#temperature'),
+      systemPromptInput = document.querySelector('#system-prompt'),
+      promptCharCount = document.querySelector('#prompt-char-count'),
+      btnResetPrompt = document.querySelector('#btn-reset-prompt'),
+      btnResetAdvanced = document.querySelector('#btn-reset-advanced');
+
+function updateCharCount(){
+  if(promptCharCount && systemPromptInput){
+    const len = systemPromptInput.value.length;
+    const isCustom = systemPromptInput.value.trim() !== (systemPromptInput.defaultValue || '').trim();
+    promptCharCount.textContent = `${len} chars${isCustom ? ' (custom)' : ''}`;
+    promptCharCount.style.color = isCustom ? 'var(--coral)' : 'var(--muted)';
+  }
+}
+
+if(systemPromptInput){
+  systemPromptInput.addEventListener('input', () => {
+    updateCharCount();
+    try{ localStorage.setItem('tiny_brain_custom_system_prompt', systemPromptInput.value); }catch(e){}
+  });
+}
+
+if(btnResetPrompt && systemPromptInput){
+  btnResetPrompt.addEventListener('click', () => {
+    systemPromptInput.value = systemPromptInput.defaultValue || '';
+    updateCharCount();
+    try{ localStorage.removeItem('tiny_brain_custom_system_prompt'); }catch(e){}
+  });
+}
+
+if(btnResetAdvanced){
+  btnResetAdvanced.addEventListener('click', () => {
+    if(thinkingCheckbox){
+      thinkingCheckbox.checked = false;
+      if(thinkingModeLabel) thinkingModeLabel.textContent = 'Fast Chat';
+    }
+    if(contextWindowInput) contextWindowInput.value = contextWindowInput.defaultValue || '';
+    if(reasoningBudgetInput) reasoningBudgetInput.value = '';
+    if(temperatureInput) temperatureInput.value = temperatureInput.defaultValue || '0.2';
+    if(systemPromptInput) systemPromptInput.value = systemPromptInput.defaultValue || '';
+    updateCharCount();
+    try{
+      localStorage.removeItem('tiny_brain_custom_system_prompt');
+      localStorage.removeItem('tiny_brain_thinking');
+      localStorage.removeItem('tiny_brain_context_window');
+      localStorage.removeItem('tiny_brain_reasoning_budget');
+      localStorage.removeItem('tiny_brain_temperature');
+    }catch(e){}
+  });
+}
+
+if(contextWindowInput){
+  contextWindowInput.addEventListener('input', () => {
+    try{ localStorage.setItem('tiny_brain_context_window', contextWindowInput.value); }catch(e){}
+  });
+}
+
+if(reasoningBudgetInput){
+  reasoningBudgetInput.addEventListener('input', () => {
+    try{ localStorage.setItem('tiny_brain_reasoning_budget', reasoningBudgetInput.value); }catch(e){}
+  });
+}
+
+if(temperatureInput){
+  temperatureInput.addEventListener('input', () => {
+    try{ localStorage.setItem('tiny_brain_temperature', temperatureInput.value); }catch(e){}
+  });
+}
 
 if(thinkingCheckbox && thinkingModeLabel){
   thinkingCheckbox.addEventListener('change', () => {
     thinkingModeLabel.textContent = thinkingCheckbox.checked ? 'Deep Think' : 'Fast Chat';
+    try{ localStorage.setItem('tiny_brain_thinking', thinkingCheckbox.checked ? 'true' : 'false'); }catch(e){}
   });
 }
+
+if(advancedModeCheckbox && advancedPanel){
+  advancedModeCheckbox.addEventListener('change', () => {
+    const active = advancedModeCheckbox.checked;
+    advancedPanel.hidden = !active;
+    if(advancedModeLabel) advancedModeLabel.textContent = active ? 'Advanced: ON' : 'Advanced';
+    try{ localStorage.setItem('tiny_brain_advanced_mode', active ? 'true' : 'false'); }catch(e){}
+    if(active) updateCharCount();
+  });
+}
+
+try{
+  if(localStorage.getItem('tiny_brain_advanced_mode') === 'true' && advancedModeCheckbox && advancedPanel){
+    advancedModeCheckbox.checked = true;
+    advancedPanel.hidden = false;
+    if(advancedModeLabel) advancedModeLabel.textContent = 'Advanced: ON';
+  }
+  const savedPrompt = localStorage.getItem('tiny_brain_custom_system_prompt');
+  if(savedPrompt !== null && systemPromptInput) systemPromptInput.value = savedPrompt;
+  const savedThinking = localStorage.getItem('tiny_brain_thinking');
+  if(savedThinking !== null && thinkingCheckbox){
+    thinkingCheckbox.checked = savedThinking === 'true';
+    if(thinkingModeLabel) thinkingModeLabel.textContent = thinkingCheckbox.checked ? 'Deep Think' : 'Fast Chat';
+  }
+  const savedContext = localStorage.getItem('tiny_brain_context_window');
+  if(savedContext !== null && contextWindowInput) contextWindowInput.value = savedContext;
+  const savedBudget = localStorage.getItem('tiny_brain_reasoning_budget');
+  if(savedBudget !== null && reasoningBudgetInput) reasoningBudgetInput.value = savedBudget;
+  const savedTemp = localStorage.getItem('tiny_brain_temperature');
+  if(savedTemp !== null && temperatureInput) temperatureInput.value = savedTemp;
+}catch(e){}
+updateCharCount();
 
 function renderAssistantMessage(msg){
   const el = document.createElement('div');
@@ -382,14 +548,37 @@ form.addEventListener('submit', async event => {
   messagesContainer.scrollTop = messagesContainer.scrollHeight;
 
   try {
+    const payload = {
+      message: text,
+      thinking: Boolean(thinkingCheckbox && thinkingCheckbox.checked),
+      context: context
+    };
+
+    if(advancedModeCheckbox && advancedModeCheckbox.checked){
+      if(contextWindowInput && contextWindowInput.value){
+        const cw = parseInt(contextWindowInput.value, 10);
+        if(!isNaN(cw) && cw >= 100) payload.context_tokens = cw;
+      }
+      if(reasoningBudgetInput && reasoningBudgetInput.value){
+        const rb = parseInt(reasoningBudgetInput.value, 10);
+        if(!isNaN(rb) && rb > 0) payload.reasoning_budget = rb;
+      }
+      if(temperatureInput && temperatureInput.value){
+        const t = parseFloat(temperatureInput.value);
+        if(!isNaN(t) && t >= 0.0) payload.temperature = t;
+      }
+      if(systemPromptInput && systemPromptInput.value){
+        const sp = systemPromptInput.value.trim();
+        if(sp) payload.system_prompt = sp;
+      }
+    } else {
+      payload.thinking = false;
+    }
+
     const response = await fetch('/chat/stream', {
       method: 'POST',
       headers: {'content-type': 'application/json'},
-      body: JSON.stringify({
-        message: text,
-        thinking: thinkingCheckbox.checked,
-        context: context
-      })
+      body: JSON.stringify(payload)
     });
     if(!response.ok) throw new Error((await response.json()).detail || 'Chat unavailable');
     if(!response.body) throw new Error('Streaming is unavailable');

@@ -60,13 +60,15 @@ class RetrievalResult:
 
     def context(self) -> str:
         if not self.citations:
-            return "[NO MATCHING VAULT SOURCES]\nThe vault search returned no relevant indexed source blocks.\n[/NO MATCHING VAULT SOURCES]"
+            return "<vault_reference_data>\n[NO MATCHING VAULT SOURCES]\nThe vault search returned no relevant indexed source blocks.\n[/NO MATCHING VAULT SOURCES]\n</vault_reference_data>"
         blocks = []
         for citation in self.citations:
             blocks.append(
+                f"<vault_reference_data id=\"{citation.citation_id}\" path=\"{citation.relative_path}\">\n"
                 f"[SOURCE {citation.citation_id}]\nPath: {citation.relative_path}\n"
                 f"Title: {citation.title}\nHeading: {citation.heading_path}\n"
-                f"Relationship: {citation.relationship}\nContent:\n{citation.content}\n[/SOURCE {citation.citation_id}]"
+                f"Relationship: {citation.relationship}\nContent:\n{citation.content}\n[/SOURCE {citation.citation_id}]\n"
+                f"</vault_reference_data>"
             )
         return "\n\n".join(blocks)
 

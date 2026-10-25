@@ -65,6 +65,7 @@ class LlamaClient:
         response_format: dict[str, Any] | None = None,
         id_slot: int | None = 0,
         lookup_ngram_min: int | None = None,
+        reasoning_effort: str | None = None,
     ) -> dict[str, Any]:
         output_tokens = max_tokens or self.max_tokens
         payload: dict[str, Any] = {"model": self.model, "messages": messages, "temperature": temperature, "stream": stream, "max_tokens": output_tokens}
@@ -82,6 +83,9 @@ class LlamaClient:
         if not thinking:
             payload["reasoning_effort"] = "none"
             payload["chat_template_kwargs"] = {"enable_thinking": False}
+        elif reasoning_effort is not None:
+            payload["reasoning_effort"] = reasoning_effort
+            payload["chat_template_kwargs"] = {"enable_thinking": reasoning_effort != "none"}
         self._active_requests += 1
         self._last_active_time = time.time()
         try:
@@ -114,10 +118,12 @@ class LlamaClient:
         ngram_min = lookup_ngram_min if lookup_ngram_min is not None else self.lookup_ngram_min
         if ngram_min is not None and ngram_min > 0:
             payload["lookup_ngram_min"] = ngram_min
-        if reasoning_effort is not None or not thinking:
-            reasoning_effort = reasoning_effort or "none"
-            payload["reasoning_effort"] = reasoning_effort
+        if not thinking:
+            payload["reasoning_effort"] = "none"
             payload["chat_template_kwargs"] = {"enable_thinking": False}
+        elif reasoning_effort is not None:
+            payload["reasoning_effort"] = reasoning_effort
+            payload["chat_template_kwargs"] = {"enable_thinking": reasoning_effort != "none"}
         self._active_requests += 1
         self._last_active_time = time.time()
         try:

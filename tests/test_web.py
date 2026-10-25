@@ -386,3 +386,157 @@ def test_unified_proposal_in_draft_chat_stream(tmp_path: Path):
     assert apprv.status_code == 200
     assert (vault / "Stoicism.md").exists()
     assert "Virtue is the sole good." in (vault / "Stoicism.md").read_text(encoding="utf-8")
+
+
+def test_home_renders_advanced_mode_and_model_configs(tmp_path: Path):
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    settings = Settings(vault, tmp_path / "data", tmp_path / "data/db.sqlite", tmp_path / "models", "http://127.0.0.1:9/v1", "gemma-test-model.gguf", "embed", "none", 8192, 4, "tiny-brain.test", True, .9, True, "127.0.0.1", 8000)
+    app = create_app(settings)
+    client = TestClient(app)
+    response = client.get("/")
+    assert response.status_code == 200
+    html = response.text
+    assert 'id="advanced-mode"' in html
+    assert 'id="advanced-panel"' in html
+    assert 'id="context-window"' in html
+    assert 'id="reasoning-budget"' in html
+    assert 'id="temperature"' in html
+    assert 'id="system-prompt"' in html
+    assert 'id="thinking"' in html
+    assert "gemma-test-model.gguf" in html
+    assert "REASONING MODE" in html
+
+
+def test_api_config_endpoint(tmp_path: Path):
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    settings = Settings(vault, tmp_path / "data", tmp_path / "data/db.sqlite", tmp_path / "models", "http://127.0.0.1:9/v1", "test-chat-model.gguf", "embed", "none", 8192, 4, "tiny-brain.test", True, .9, True, "127.0.0.1", 8000)
+    app = create_app(settings)
+    client = TestClient(app)
+    response = client.get("/api/config")
+    assert response.status_code == 200
+    data = response.json()
+    assert "You are Tiny Brain" in data["system_prompt"]
+    assert data["context_tokens"] == 8192
+    assert data["chat_model"] == "test-chat-model.gguf"
+    assert "max_output_tokens" in data
+    assert "fast_chat_max_tokens" in data
+
+
+def test_chat_stream_passes_custom_system_prompt_to_model(tmp_path: Path):
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    settings = Settings(vault, tmp_path / "data", tmp_path / "data/db.sqlite", tmp_path / "models", "http://127.0.0.1:9/v1", "model", "embed", "none", 8192, 4, "tiny-brain.test", True, .9, True, "127.0.0.1", 8000)
+    app = create_app(settings)
+    received_messages = []
+
+    class FakeLlama:
+        async def complete(self, messages, **kwargs):
+            return {"choices": [{"message": {"content": "NONE"}}]}
+
+        async def stream(self, messages, **kwargs):
+            nonlocal received_messages
+            received_messages = list(messages)
+            yield StreamChunk(content="Direct answer with custom prompt.")
+
+    app.state.llama = FakeLlama()
+    custom_prompt = "You are a specialized biology assistant. Answer only in Latin names."
+    response = TestClient(app).post("/chat/stream", json={
+        "message": "what is this plant?",
+        "system_prompt": custom_prompt,
+        "thinking": False,
+    })
+    assert response.status_code == 200
+    assert len(received_messages) >= 1
+    assert received_messages[0]["role"] == "system"
+    assert received_messages[0]["content"] == custom_prompt
+
+
+def test_chat_stream_passes_custom_reasoning_budget_and_temperature(tmp_path: Path):
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    settings = Settings(vault, tmp_path / "data", tmp_path / "data/db.sqlite", tmp_path / "models", "http://127.0.0.1:9/v1", "model", "embed", "none", 8192, 4, "tiny-brain.test", True, .9, True, "127.0.0.1", 8000)
+    app = create_app(settings)
+    received_kwargs = {}
+
+    class FakeLlama:
+        async def complete(self, messages, **kwargs):
+            return {"choices": [{"message": {"content": "NONE"}}]}
+
+        async def stream(self, messages, **kwargs):
+            nonlocal received_kwargs
+            received_kwargs = dict(kwargs)
+            yield StreamChunk(content="Custom budget reply.")
+
+    app.state.llama = FakeLlama()
+    response = TestClient(app).post("/chat/stream", json={
+        "message": "deep problem",
+        "thinking": True,
+        "reasoning_budget": 1500,
+        "temperature": 0.45,
+    })
+    assert response.status_code == 200
+    assert received_kwargs.get("max_tokens") == 1500
+    assert received_kwargs.get("temperature") == 0.45
+    assert received_kwargs.get("thinking") is True
+
+
+def test_chat_endpoint_supports_custom_system_prompt_and_budget(tmp_path: Path):
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    settings = Settings(vault, tmp_path / "data", tmp_path / "data/db.sqlite", tmp_path / "models", "http://127.0.0.1:9/v1", "model", "embed", "none", 8192, 4, "tiny-brain.test", True, .9, True, "127.0.0.1", 8000)
+    app = create_app(settings)
+    captured = {}
+
+    class FakeLlama:
+        async def complete(self, messages, **kwargs):
+            captured["messages"] = list(messages)
+            captured["kwargs"] = dict(kwargs)
+            return {"choices": [{"message": {"content": "Non-streaming answer"}}]}
+
+    app.state.llama = FakeLlama()
+    custom_prompt = "Custom system instructions"
+    response = TestClient(app).post("/chat", json={
+        "message": "test question",
+        "system_prompt": custom_prompt,
+        "reasoning_budget": 800,
+        "temperature": 0.35,
+        "thinking": True,
+    })
+    assert response.status_code == 200
+    assert captured["messages"][0]["role"] == "system"
+    assert captured["messages"][0]["content"] == custom_prompt
+    assert captured["kwargs"]["max_tokens"] == 800
+    assert captured["kwargs"]["temperature"] == 0.35
+    assert captured["kwargs"]["thinking"] is True
+
+
+def test_chat_custom_context_tokens_limits_retrieval(tmp_path: Path):
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    (vault / "note.md").write_text("# Note\n" + "Word " * 2000, encoding="utf-8")
+    settings = Settings(vault, tmp_path / "data", tmp_path / "data/db.sqlite", tmp_path / "models", "http://127.0.0.1:9/v1", "model", "embed", "none", 16384, 4, "tiny-brain.test", True, .9, True, "127.0.0.1", 8000)
+    app = create_app(settings)
+    app.state.indexer.full_scan()
+
+    class FakeLlama:
+        async def complete(self, messages, **kwargs):
+            return {"choices": [{"message": {"content": "Note"}}]}
+
+        async def stream(self, messages, **kwargs):
+            yield StreamChunk(content="Answer")
+
+    app.state.llama = FakeLlama()
+    client = TestClient(app)
+
+    # Pass small context window (e.g. 200 tokens -> budget 100 tokens)
+    response = client.post("/chat", json={
+        "message": "tell me about Note",
+        "context_tokens": 200,
+        "thinking": False,
+    })
+    assert response.status_code == 200
+    assert "sources" in response.json()
+
+

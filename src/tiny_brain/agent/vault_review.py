@@ -193,7 +193,8 @@ def splice_section_paragraph(
             before = base[:start]
             after = base[end:]
             return before + clean_paragraph + ("\n" if not clean_paragraph.endswith("\n") else "") + after
-        return base.rstrip() + "\n\n" + clean_paragraph + "\n"
+        # Fail-closed: do not silently degrade a section replacement into an append
+        return base
 
     # Default: append
     if target_section is not None:
@@ -218,6 +219,12 @@ def validate_decision(decision: ReviewDecision, candidates: list[CandidateNote],
         if candidate is None:
             return "update target is not a candidate note"
         sections = _ensure_sections(candidate)
+        if decision.action in ("replace_section", "replace"):
+            if not decision.section_id or not any(s.section_id == decision.section_id for s in sections):
+                return "section_id not found in candidate note"
+        elif decision.action == "append" and decision.section_id:
+            if not any(s.section_id == decision.section_id for s in sections):
+                return "section_id not found in candidate note"
         spliced = splice_section_paragraph(candidate.content, sections, decision.action, decision.section_id, decision.content)
         return check_content(candidate.content, spliced, is_update=True)
     if decision.path.split("/")[0] == RESERVED_PREFIX:
@@ -268,6 +275,9 @@ def check_content(base: str, content: str, *, is_update: bool) -> str | None:
         return "proposed content has no changes"
     if is_update and len(content) < MIN_UPDATE_RATIO * len(base):
         return "proposed update drops too much of the note"
+    fences = re.findall(r"(?m)^```", content)
+    if len(fences) % 2 != 0:
+        return "proposed content has unclosed code fence"
     return None
 
 

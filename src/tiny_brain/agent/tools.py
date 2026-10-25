@@ -37,15 +37,15 @@ class ReadTools:
     def invoke(self, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
         handler = self._handlers.get(name)
         if handler is None:
-            raise ToolError("tool is not available")
+            raise ToolError(f"Tool '{name}' is not available. Available tools: {list(self._handlers.keys())}")
         try:
             return handler(**arguments)
         except TypeError as exc:
-            raise ToolError("invalid tool arguments") from exc
+            raise ToolError(f"Invalid arguments for tool '{name}': {exc}") from exc
 
     def search_notes(self, query: str, limit: int = 8) -> dict[str, Any]:
         if not isinstance(query, str) or len(query) > 500:
-            raise ToolError("query is invalid")
+            raise ToolError("Query is invalid: must be a string up to 500 characters")
         result = Retriever(self.connection, self.embedding_provider).search(query, limit=max(1, min(limit, 30)), context_tokens=4000)
         return {"results": [{"citation_id": item.citation_id, "path": item.relative_path, "title": item.title, "heading": item.heading_path, "content": item.content} for item in result.citations]}
 
@@ -53,12 +53,12 @@ class ReadTools:
         try:
             safe_path = resolve_vault_path(self.vault_root, path)
         except UnsafePath as exc:
-            raise ToolError("unsafe note path") from exc
+            raise ToolError(f"Unsafe note path '{path}': paths must be relative and stay within vault") from exc
         if not safe_path.exists():
-            raise ToolError("note not found")
+            raise ToolError(f"Note '{path}' was not found in vault. Use search_notes to locate existing notes.")
         content = safe_path.read_text(encoding="utf-8")
         if len(content) > 2_000_000:
-            raise ToolError("note exceeds read limit")
+            raise ToolError("Note exceeds maximum read limit (2MB)")
         return {"path": path, "content": content}
 
     def find_backlinks(self, path: str, limit: int = 20) -> dict[str, Any]:

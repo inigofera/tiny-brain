@@ -106,6 +106,8 @@ def test_validate_decision_gates(tmp_path: Path):
     assert validate_decision(ReviewDecision("create", "high", "Quartz Harbor.md", "r", "# X\n"), candidates, vault) is not None
     assert validate_decision(ReviewDecision("create", "high", "_AI/Inbox.md", "r", "# X\n"), candidates, vault) is not None
     assert validate_decision(ReviewDecision("create", "high", "../escape.md", "r", "# X\n"), candidates, vault) is not None
+    assert validate_decision(ReviewDecision("replace_section", "high", "Quartz Harbor.md", "r", "New body", section_id="sec_missing"), candidates, vault) == "section_id not found in candidate note"
+    assert validate_decision(ReviewDecision("create", "high", "Broken.md", "r", "# Broken\n```python\nprint('unclosed')\n"), candidates, vault) == "proposed content has unclosed code fence"
 
 
 def test_make_diff_marks_added_lines():
@@ -250,6 +252,10 @@ def test_splice_section_paragraph_operations():
     assert "Completely revised body two." in replaced
     assert "Body of section two." not in replaced
     assert "Body of section one." in replaced
+
+    # 2b. Replace with nonexistent section_id fails closed (returns base unmodified)
+    failed_replace = splice_section_paragraph(base, sections, "replace_section", "sec_nonexistent_999", "Replaced body.")
+    assert failed_replace == base
 
     # 3. Create Note
     created = splice_section_paragraph("", [], "create_note", None, "# New Note\n\nContent.")

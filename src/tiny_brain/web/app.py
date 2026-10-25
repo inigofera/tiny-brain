@@ -284,6 +284,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             session_id = get_or_create_active_session(connection)
             record_chat_message(connection, session_id, "user", request.message)
         query = await plan_vault_search(app.state.llama, request.message)
+        ctx_tokens = request.context_tokens if request.context_tokens is not None else settings.context_tokens
         with database.connect() as connection:
             retrieval = (
                 Retriever(
@@ -292,15 +293,29 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     reranker,
                     context_compression=settings.context_compression,
                     max_compressed_sentences=settings.max_compressed_sentences,
-                ).search(query, limit=8, context_tokens=settings.context_tokens // 2)
+                ).search(query, limit=8, context_tokens=ctx_tokens // 2)
                 if query
                 else RetrievalResult("", (), (), 0)
             )
             answer_retrieval = retrieval
-            chat_max_tokens = settings.max_output_tokens if request.thinking else settings.fast_chat_max_tokens
+            chat_max_tokens = (
+                request.reasoning_budget
+                if request.reasoning_budget is not None
+                else (settings.max_output_tokens if request.thinking else settings.fast_chat_max_tokens)
+            )
+            temp = request.temperature if request.temperature is not None else 0.2
+            active_system_prompt = request.system_prompt.strip() if request.system_prompt and request.system_prompt.strip() else SYSTEM_PROMPT
             try:
-                result = await ChatAgent(llama, settings.max_tool_loops).answer(
-                    request.message, answer_retrieval, tools=None, thinking=request.thinking, context=request.context, max_tokens=chat_max_tokens
+                result = await ChatAgent(app.state.llama, settings.max_tool_loops).answer(
+                    request.message,
+                    answer_retrieval,
+                    tools=None,
+                    thinking=request.thinking,
+                    context=request.context,
+                    max_tokens=chat_max_tokens,
+                    system_prompt=active_system_prompt,
+                    temperature=temp,
+                    reasoning_effort=request.reasoning_effort,
                 )
                 answer = result.answer
             except Exception as exc:
@@ -331,6 +346,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if draft_request and not draft_topic and request.context:
             draft_topic = _draft_topic(request.context)
         retrieval_query = draft_topic if draft_request else await plan_vault_search(app.state.llama, request.message, request.context)
+        ctx_tokens = request.context_tokens if request.context_tokens is not None else settings.context_tokens
         with database.connect() as connection:
             retrieval = (
                 Retriever(
@@ -339,7 +355,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     reranker,
                     context_compression=settings.context_compression,
                     max_compressed_sentences=settings.max_compressed_sentences,
-                ).search(retrieval_query, limit=8, context_tokens=settings.context_tokens // 2)
+                ).search(retrieval_query, limit=8, context_tokens=ctx_tokens // 2)
                 if retrieval_query
                 else RetrievalResult("", (), (), 0)
             )
@@ -348,8 +364,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         draft_prefix = "# Draft note\n\n"
         conversation_context = _conversation_context_for(request.message, request.context, draft_mode=draft_mode)
         source_block = answer_retrieval.context() if answer_retrieval.citations else ""
+        active_system_prompt = request.system_prompt.strip() if request.system_prompt and request.system_prompt.strip() else SYSTEM_PROMPT
         messages = build_chat_messages(
-            SYSTEM_PROMPT,
+            active_system_prompt,
             request.message,
             rag_context=source_block,
             conversation_context=conversation_context,
@@ -363,12 +380,21 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             try:
                 if draft_mode:
                     yield f"data: {json.dumps({'type': 'token', 'content': draft_prefix})}\n\n"
-                stream_max_tokens = 1024 if draft_mode else (settings.max_output_tokens if request.thinking else settings.fast_chat_max_tokens)
+                if request.reasoning_budget is not None:
+                    stream_max_tokens = request.reasoning_budget
+                elif draft_mode:
+                    stream_max_tokens = 1024
+                elif request.thinking:
+                    stream_max_tokens = settings.max_output_tokens
+                else:
+                    stream_max_tokens = settings.fast_chat_max_tokens
+                temp = request.temperature if request.temperature is not None else (0.1 if draft_mode else 0.2)
+                effort = "none" if draft_mode else request.reasoning_effort
                 async for chunk in app.state.llama.stream(
                     messages,
-                    temperature=0.1 if draft_mode else 0.2,
+                    temperature=temp,
                     max_tokens=stream_max_tokens,
-                    reasoning_effort="none" if draft_mode else None,
+                    reasoning_effort=effort,
                     thinking=False if draft_mode else request.thinking,
                 ):
                     if chunk.reasoning:
@@ -595,9 +621,31 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def rebuild_index() -> dict[str, object]:
         return indexer.full_scan()
 
+    @app.get("/api/config")
+    async def get_model_config() -> dict[str, object]:
+        return {
+            "system_prompt": SYSTEM_PROMPT,
+            "context_tokens": settings.context_tokens,
+            "max_output_tokens": settings.max_output_tokens,
+            "fast_chat_max_tokens": settings.fast_chat_max_tokens,
+            "chat_model": settings.chat_model,
+        }
+
     @app.get("/", response_class=HTMLResponse)
     async def home(request: Request):
-        return templates.TemplateResponse(request=request, name="index.html", context={"request": request, "host": settings.lan_host})
+        return templates.TemplateResponse(
+            request=request,
+            name="index.html",
+            context={
+                "request": request,
+                "host": settings.lan_host,
+                "default_system_prompt": SYSTEM_PROMPT,
+                "default_context_tokens": settings.context_tokens,
+                "default_max_output_tokens": settings.max_output_tokens,
+                "default_fast_chat_max_tokens": settings.fast_chat_max_tokens,
+                "chat_model": settings.chat_model,
+            },
+        )
 
     @app.get("/ui/search", response_class=HTMLResponse)
     async def search_page(request: Request):
