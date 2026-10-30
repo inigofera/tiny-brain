@@ -14,3 +14,5 @@ build/
 models/
 staging/
 *.zip
+
+.vscode/
