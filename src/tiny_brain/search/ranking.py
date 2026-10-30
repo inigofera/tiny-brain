@@ -26,7 +26,7 @@ def reciprocal_rank_fusion(*hit_lists: Sequence[Any], limit: int = 20, constant:
         weight = weights[idx] if weights and idx < len(weights) else 1.0
         for rank, hit in enumerate(hit_list, start=1):
             if isinstance(hit, LexicalHit):
-                reasons = ["lexical match"]
+                reasons = [hit.reason] if getattr(hit, "reason", None) else ["lexical match"]
             elif isinstance(hit, RankedHit):
                 reasons = list(hit.reasons) if hit.reasons else ["match"]
             else:

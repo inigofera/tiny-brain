@@ -8,7 +8,7 @@ from dataclasses import dataclass
 
 from ..vault.chunker import format_breadcrumb
 from .embeddings import EmbeddingProvider, EmbeddingUnavailable, cosine_similarity, pack_vector, unpack_vector
-from .lexical import search as lexical_search
+from .lexical import search as lexical_search, toc_search
 from .ranking import RankedHit, reciprocal_rank_fusion
 from .reranking import Reranker
 
@@ -49,6 +49,7 @@ class Citation:
     heading_path: str
     content: str
     relationship: str
+    outline_context: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -63,10 +64,12 @@ class RetrievalResult:
             return "<vault_reference_data>\n[NO MATCHING VAULT SOURCES]\nThe vault search returned no relevant indexed source blocks.\n[/NO MATCHING VAULT SOURCES]\n</vault_reference_data>"
         blocks = []
         for citation in self.citations:
+            outline_part = f"Outline Context: {citation.outline_context}\n" if citation.outline_context else ""
             blocks.append(
                 f"<vault_reference_data id=\"{citation.citation_id}\" path=\"{citation.relative_path}\">\n"
                 f"[SOURCE {citation.citation_id}]\nPath: {citation.relative_path}\n"
                 f"Title: {citation.title}\nHeading: {citation.heading_path}\n"
+                f"{outline_part}"
                 f"Relationship: {citation.relationship}\nContent:\n{citation.content}\n[/SOURCE {citation.citation_id}]\n"
                 f"</vault_reference_data>"
             )
@@ -132,6 +135,7 @@ class Retriever:
             body = "\n".join(sents)
             formatted_content = f"{breadcrumb}\n{body}"
             selected_hits.append(hit)
+            outline_ctx = self._fetch_outline_context(hit.section_id)
             citations.append(Citation(
                 citation_id=f"S{len(citations) + 1}",
                 section_id=hit.section_id,
@@ -140,15 +144,21 @@ class Retriever:
                 heading_path=hit.heading_path,
                 content=formatted_content,
                 relationship=", ".join(hit.reasons + ["compressed"]),
+                outline_context=outline_ctx,
             ))
         return citations, selected_hits
 
     def search(self, query: str, *, limit: int = 8, context_tokens: int = 4000) -> RetrievalResult:
         lexical = lexical_search(self.connection, query, limit=max(limit * 3, 20))
         semantic = self._semantic_search(query, limit=max(limit * 3, 20))
+        toc = toc_search(self.connection, query, limit=max(limit * 3, 20))
 
         # Identify primary target notes and sections from top direct hits
-        primary_section_ids = [hit.section_id for hit in lexical[:10]] + [hit.section_id for hit in semantic[:10]]
+        primary_section_ids = (
+            [hit.section_id for hit in lexical[:10]]
+            + [hit.section_id for hit in semantic[:10]]
+            + [hit.section_id for hit in toc[:10]]
+        )
         explicit_tag_words = [w.lstrip("#").lower() for w in query.split() if w.startswith("#") and len(w) > 1]
         if not primary_section_ids and not explicit_tag_words:
             return RetrievalResult(query, (), (), 0)
@@ -162,8 +172,8 @@ class Retriever:
         # Rank all channels in parallel via Reciprocal Rank Fusion with direct channels weighted above graph expansion
         rrf_limit = max(limit * 3, 20) if self.reranker else max(limit * 2, 16)
         ranked = reciprocal_rank_fusion(
-            lexical, semantic, backlinks, outgoing, tag_matches,
-            weights=(1.0, 1.0, 0.5, 0.5, 0.5),
+            lexical, semantic, backlinks, outgoing, tag_matches, toc,
+            weights=(1.0, 1.0, 0.5, 0.5, 0.5, 0.8),
             limit=rrf_limit,
         )
 
@@ -209,14 +219,43 @@ class Retriever:
                 continue
             used_tokens += estimate
             selected.append(hit)
+            outline_ctx = self._fetch_outline_context(hit.section_id)
             citations.append(Citation(
                 citation_id=f"S{len(citations) + 1}", section_id=hit.section_id,
                 relative_path=hit.relative_path, title=hit.title, heading_path=hit.heading_path,
                 content=formatted_content, relationship=", ".join(hit.reasons) or "retrieved",
+                outline_context=outline_ctx,
             ))
             if len(selected) >= limit:
                 break
         return RetrievalResult(query, tuple(selected), tuple(citations), max(0, sum(max(1, len(hit.content.split())) for hit in ranked) - used_tokens))
+
+    def _fetch_outline_context(self, section_id: str) -> str:
+        row = self.connection.execute(
+            """SELECT parent_toc_id, heading_level, heading_text, note_id FROM note_toc WHERE section_id = ?""",
+            (section_id,),
+        ).fetchone()
+        if not row:
+            return ""
+        parent_toc_id, heading_level, heading_text, note_id = row[0], row[1], row[2], row[3]
+        siblings: list[str] = []
+        if parent_toc_id:
+            sibling_rows = self.connection.execute(
+                """SELECT heading_text FROM note_toc
+                   WHERE parent_toc_id = ? AND section_id != ? ORDER BY ordinal LIMIT 3""",
+                (parent_toc_id, section_id),
+            ).fetchall()
+            siblings = [r[0] for r in sibling_rows]
+        elif heading_level == 1:
+            sibling_rows = self.connection.execute(
+                """SELECT heading_text FROM note_toc
+                   WHERE note_id = ? AND heading_level = 1 AND section_id != ? ORDER BY ordinal LIMIT 3""",
+                (note_id, section_id),
+            ).fetchall()
+            siblings = [r[0] for r in sibling_rows]
+        if siblings:
+            return f"Siblings: {' | '.join(siblings)}"
+        return ""
 
     def validate_citations(self, result: RetrievalResult, citation_ids: list[str]) -> bool:
         allowed = {citation.citation_id for citation in result.citations}

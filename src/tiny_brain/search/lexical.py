@@ -19,7 +19,7 @@ class LexicalHit:
     reason: str = "lexical match"
 
 
-def search(connection: sqlite3.Connection, query: str, limit: int = 20) -> list[LexicalHit]:
+def clean_query_terms(query: str) -> list[str]:
     raw_terms = TERM_RE.findall(query)
     if not raw_terms:
         return []
@@ -39,6 +39,13 @@ def search(connection: sqlite3.Connection, query: str, limit: int = 20) -> list[
             clean_terms = [raw_terms[0].strip(".-_").lower().replace('"', "")]
         else:
             return []
+    return clean_terms
+
+
+def search(connection: sqlite3.Connection, query: str, limit: int = 20) -> list[LexicalHit]:
+    clean_terms = clean_query_terms(query)
+    if not clean_terms:
+        return []
 
     # 1. First try strict AND matching for high-precision hits
     and_query = " AND ".join(f'"{term}"*' for term in clean_terms[:16])
@@ -71,6 +78,70 @@ def search(connection: sqlite3.Connection, query: str, limit: int = 20) -> list[
         matched_count = sum(1 for term in clean_terms[:16] if term in doc_text)
         if matched_count >= min_required_matches:
             filtered_hits.append(hit)
+            if len(filtered_hits) >= limit:
+                break
+
+    return filtered_hits
+
+
+def toc_search(connection: sqlite3.Connection, query: str, limit: int = 20) -> list[LexicalHit]:
+    clean_terms = clean_query_terms(query)
+    if not clean_terms:
+        return []
+
+    # 1. First try strict AND matching on fts_toc
+    and_query = " AND ".join(f'"{term}"*' for term in clean_terms[:16])
+    rows = connection.execute(
+        """SELECT t.section_id, t.relative_path, t.title, t.heading_path, s.content, bm25(fts_toc) AS rank, t.heading_text
+           FROM fts_toc t
+           JOIN sections s ON s.section_id = t.section_id
+           WHERE fts_toc MATCH ? ORDER BY rank LIMIT ?""",
+        (and_query, max(1, min(limit, 100))),
+    ).fetchall()
+    if rows:
+        return [
+            LexicalHit(
+                section_id=row[0],
+                relative_path=row[1],
+                title=row[2],
+                heading_path=row[3],
+                content=row[4],
+                rank=row[5],
+                reason=f"toc match: {row[6]}",
+            )
+            for row in rows
+        ]
+
+    if len(clean_terms) <= 1:
+        return []
+
+    # 2. Multi-term OR matching
+    min_required_matches = min(2, len(clean_terms))
+    or_query = " OR ".join(f'"{term}"*' for term in clean_terms[:16])
+    candidate_rows = connection.execute(
+        """SELECT t.section_id, t.relative_path, t.title, t.heading_path, s.content, bm25(fts_toc) AS rank, t.heading_text
+           FROM fts_toc t
+           JOIN sections s ON s.section_id = t.section_id
+           WHERE fts_toc MATCH ? ORDER BY rank LIMIT ?""",
+        (or_query, max(1, min(limit * 3, 100))),
+    ).fetchall()
+
+    filtered_hits: list[LexicalHit] = []
+    for row in candidate_rows:
+        text = f"{row[1]} {row[2]} {row[3]} {row[6]}".lower()
+        matched_count = sum(1 for term in clean_terms[:16] if term in text)
+        if matched_count >= min_required_matches:
+            filtered_hits.append(
+                LexicalHit(
+                    section_id=row[0],
+                    relative_path=row[1],
+                    title=row[2],
+                    heading_path=row[3],
+                    content=row[4],
+                    rank=row[5],
+                    reason=f"toc match: {row[6]}",
+                )
+            )
             if len(filtered_hits) >= limit:
                 break
 
