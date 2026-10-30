@@ -119,8 +119,8 @@ The migration system verifies the schema version on application startup.
 
 ### 4.2 Database Schema and Table Definitions
 
-The database defines fifteen relational tables and virtual tables.
-The tables store note metadata, text chunks, search indices, and audit records.
+The database defines seventeen relational tables and virtual tables.
+The tables store note metadata, text chunks, search indices, hierarchical outlines, and audit records.
 Table 2 outlines the primary database tables and their purposes.
 
 | Table Name | Type | Description |
@@ -129,6 +129,8 @@ Table 2 outlines the primary database tables and their purposes.
 | `notes` | Table | Stores note metadata, hashes, frontmatter, and indexing status |
 | `sections` | Table | Stores text chunks split by headings with token counts |
 | `fts_sections` | Virtual Table (FTS5) | Stores full-text search index for lexical retrieval |
+| `note_toc` | Table | Stores hierarchical Table of Contents heading trees with parent links |
+| `fts_toc` | Virtual Table (FTS5) | Stores full-text search index for heading titles and outline paths |
 | `section_embeddings` | Table | Stores vector embeddings, dimensions, and model metadata |
 | `links` | Table | Stores parsed wikilinks and Markdown links between notes |
 | `tags` | Table | Stores normalized tags mapped to notes |
@@ -139,6 +141,7 @@ Table 2 outlines the primary database tables and their purposes.
 | `change_proposals` | Table | Stores pending, approved, and committed note modifications |
 | `audit_events` | Table | Stores operational event records with JSON payloads |
 | `index_jobs` | Table | Stores background indexing jobs and error messages |
+| `post_chat_jobs` | Table | Stores background post-chat memory and review tasks |
 | `model_metadata` | Table | Stores model names, versions, and verification checksums |
 
 ### 4.3 Audit Event Log Structure
@@ -213,10 +216,10 @@ Polling avoids complex operating system notification dependencies.
 ### 5.2 Search Subsystem (`tiny_brain.search`)
 
 The search subsystem retrieves relevant vault sections for queries.
-The subsystem combines lexical search and semantic vector search.
-The `lexical` module queries the SQLite FTS5 virtual table.
+The subsystem combines lexical search, structural Table-of-Contents search, and semantic vector search.
+The `lexical` module queries the SQLite FTS5 virtual tables (`fts_sections` and `fts_toc`).
 The search tokenizer extracts word tokens and adds prefix wildcards.
-SQLite BM25 ranks lexical search results by relevance.
+SQLite BM25 ranks lexical and structural search results by relevance.
 
 The `embeddings` module defines vector embedding interfaces and utilities.
 The system supports local FastEmbed and sentence-transformers runtimes.
@@ -224,14 +227,14 @@ Vectors convert to compact little-endian byte buffers for storage.
 The module computes cosine similarity between query vectors and stored vectors.
 The system discards semantic matches below a similarity score of 0.75.
 
-The `ranking` module merges lexical and semantic search results.
-The module implements Reciprocal Rank Fusion (RRF).
-RRF assigns reciprocal rank scores to items from both result lists.
+The `ranking` module merges lexical, structural, and semantic search results.
+The module implements multi-channel Reciprocal Rank Fusion (RRF).
+RRF assigns reciprocal rank scores across body lexical, semantic, ToC structural, and graph channels.
 The fusion algorithm combines scores without complex score normalization.
-Items found by both methods receive higher combined ranks.
+Items found by multiple channels receive higher combined ranks.
 
-The `retrieval` module expands search results across the note link graph.
-The retriever finds sections linked from the top search hits.
+The `retrieval` module expands search results across the note link graph and outline hierarchy.
+The retriever finds sections linked from top search hits and surfaces sibling outline context.
 The retriever adds linked sections to provide contextual background.
 The retriever enforces a token budget on the total retrieved content.
 Each selected section receives a stable source citation identifier.
@@ -251,8 +254,8 @@ If the message needs no vault context, the model returns NONE.
 This step prevents unnecessary search queries for conversational chat.
 
 The `tools` module provides safe read operations for the model.
-The model can invoke six distinct read tools.
-These tools are `search_notes`, `read_note`, and `find_backlinks`.
+The model can invoke seven distinct read tools.
+These tools are `search_notes`, `read_note`, `get_note_outline`, and `find_backlinks`.
 Additional tools are `find_related_notes`, `find_notes_by_tag`, and `find_recent_notes`.
 The tool handler rejects unsafe paths and limits result counts.
 The model has no write tools or shell execution tools.
