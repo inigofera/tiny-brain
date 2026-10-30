@@ -10,8 +10,8 @@ from typing import Iterable
 from ..db import Database
 from ..search.embeddings import EmbeddingProvider
 from ..search.retrieval import store_embedding
-from .chunker import Section, chunk_note
-from .parser import ParsedNote, parse_note
+from .chunker import Section, chunk_note, link_toc_to_sections
+from .parser import ParsedNote, ToCEntry, build_table_of_contents, parse_note
 from .paths import is_indexable_markdown, validate_relative_path
 
 
@@ -64,7 +64,8 @@ class VaultIndexer:
         try:
             note = parse_note(relative_path, content)
             sections = chunk_note(note)
-            self._replace_note(note, sections, path.stat().st_mtime)
+            toc_entries = link_toc_to_sections(build_table_of_contents(note), sections)
+            self._replace_note(note, sections, path.stat().st_mtime, toc_entries=toc_entries)
         except Exception as exc:
             self._record_failure(relative_path, content_hash, len(content.encode("utf-8")), str(exc))
             raise IndexErrorPreservingState(relative_path) from exc
@@ -73,12 +74,22 @@ class VaultIndexer:
     def remove_path(self, relative_path: str) -> bool:
         relative_path = validate_relative_path(relative_path)
         with self.database.connect() as connection:
+            connection.execute("DELETE FROM fts_sections WHERE relative_path = ?", (relative_path,))
+            connection.execute("DELETE FROM fts_toc WHERE relative_path = ?", (relative_path,))
             cursor = connection.execute("DELETE FROM notes WHERE relative_path = ?", (relative_path,))
         return cursor.rowcount > 0
 
-    def _replace_note(self, note: ParsedNote, sections: list[Section], modified_time: float) -> None:
+    def _replace_note(
+        self,
+        note: ParsedNote,
+        sections: list[Section],
+        modified_time: float,
+        toc_entries: list[ToCEntry] | None = None,
+    ) -> None:
         note_id = _note_id(note.relative_path)
         now = _now()
+        if toc_entries is None:
+            toc_entries = link_toc_to_sections(build_table_of_contents(note), sections)
         vectors = (
             self.embedding_provider.embed([f"{section.breadcrumb}\n{section.content}" for section in sections])
             if self.embedding_provider
@@ -94,6 +105,7 @@ class VaultIndexer:
             connection.execute("BEGIN IMMEDIATE")
             try:
                 connection.execute("DELETE FROM fts_sections WHERE relative_path = ?", (note.relative_path,))
+                connection.execute("DELETE FROM fts_toc WHERE relative_path = ?", (note.relative_path,))
                 connection.execute("DELETE FROM notes WHERE relative_path = ?", (note.relative_path,))
                 connection.execute(
                     """INSERT INTO notes
@@ -136,6 +148,24 @@ class VaultIndexer:
                         )
                 for tag in note.tags:
                     connection.execute("INSERT INTO tags(tag, note_id) VALUES (?, ?)", (tag, note_id))
+                for entry in toc_entries:
+                    connection.execute(
+                        """INSERT INTO note_toc
+                        (toc_id, note_id, relative_path, heading_level, heading_text, heading_path_json,
+                         parent_toc_id, ordinal, start_offset, end_offset, section_id)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                        (entry.toc_id, note_id, entry.relative_path, entry.heading_level, entry.heading_text,
+                         json.dumps(entry.heading_path), entry.parent_toc_id, entry.ordinal,
+                         entry.start_offset, entry.end_offset, entry.section_id),
+                    )
+                    heading_path_str = " / ".join(entry.heading_path)
+                    connection.execute(
+                        """INSERT INTO fts_toc
+                        (toc_id, note_id, section_id, relative_path, title, heading_text, heading_path)
+                        VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                        (entry.toc_id, note_id, entry.section_id, note.relative_path, note.title,
+                         entry.heading_text, heading_path_str),
+                    )
                 connection.execute("COMMIT")
             except Exception:
                 connection.execute("ROLLBACK")

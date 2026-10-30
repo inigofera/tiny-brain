@@ -31,6 +31,20 @@ class Heading:
     end: int
 
 
+@dataclass(frozen=True, slots=True)
+class ToCEntry:
+    toc_id: str
+    relative_path: str
+    heading_level: int
+    heading_text: str
+    heading_path: tuple[str, ...]
+    parent_toc_id: str | None
+    ordinal: int
+    start_offset: int
+    end_offset: int
+    section_id: str | None = None
+
+
 @dataclass(slots=True)
 class ParsedNote:
     relative_path: str
@@ -99,6 +113,34 @@ def parse_note(relative_path: str, content: str) -> ParsedNote:
 def parse_file(vault_root: Path, relative_path: str) -> ParsedNote:
     path = vault_root / Path(*relative_path.split("/"))
     return parse_note(relative_path, path.read_text(encoding="utf-8"))
+
+
+def build_table_of_contents(note: ParsedNote) -> list[ToCEntry]:
+    entries: list[ToCEntry] = []
+    stack: list[tuple[int, str, str]] = []
+    for ordinal, heading in enumerate(note.headings):
+        while stack and stack[-1][0] >= heading.level:
+            stack.pop()
+        parent_toc_id = stack[-1][2] if stack else None
+        current_path = tuple(item[1] for item in stack) + (heading.text,)
+        toc_id = hashlib.sha256(
+            f"{note.relative_path}:{ordinal}:{heading.text}:{heading.start}".encode("utf-8")
+        ).hexdigest()[:24]
+        stack.append((heading.level, heading.text, toc_id))
+        entries.append(
+            ToCEntry(
+                toc_id=toc_id,
+                relative_path=note.relative_path,
+                heading_level=heading.level,
+                heading_text=heading.text,
+                heading_path=current_path,
+                parent_toc_id=parent_toc_id,
+                ordinal=ordinal,
+                start_offset=heading.start,
+                end_offset=heading.end,
+            )
+        )
+    return entries
 
 
 def _split_frontmatter(content: str) -> tuple[str, dict[str, Any], str]:

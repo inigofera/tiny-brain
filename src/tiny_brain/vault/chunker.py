@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Sequence
 
-from .parser import ParsedNote
+from .parser import ParsedNote, ToCEntry
 
 
 def format_breadcrumb(relative_path: str, heading_path: Sequence[str] = ()) -> str:
@@ -91,3 +91,35 @@ def _split(content: str, *, max_chars: int, overlap_chars: int) -> list[str]:
             break
         start = max(start + 1, end - overlap_chars)
     return pieces
+
+
+def link_toc_to_sections(toc_entries: Sequence[ToCEntry], sections: Sequence[Section]) -> list[ToCEntry]:
+    if not sections or not toc_entries:
+        return list(toc_entries)
+    linked: list[ToCEntry] = []
+    for entry in toc_entries:
+        matched_section_id: str | None = None
+        for section in sections:
+            if section.start_offset <= entry.start_offset < section.end_offset:
+                matched_section_id = section.section_id
+                break
+            if section.start_offset >= entry.start_offset:
+                matched_section_id = section.section_id
+                break
+        if matched_section_id is None and sections:
+            matched_section_id = sections[-1].section_id
+        linked.append(
+            ToCEntry(
+                toc_id=entry.toc_id,
+                relative_path=entry.relative_path,
+                heading_level=entry.heading_level,
+                heading_text=entry.heading_text,
+                heading_path=entry.heading_path,
+                parent_toc_id=entry.parent_toc_id,
+                ordinal=entry.ordinal,
+                start_offset=entry.start_offset,
+                end_offset=entry.end_offset,
+                section_id=matched_section_id,
+            )
+        )
+    return linked

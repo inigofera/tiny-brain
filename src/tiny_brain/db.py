@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Iterator
 
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 
 class Database:
@@ -72,6 +72,28 @@ class Database:
 
                 CREATE VIRTUAL TABLE IF NOT EXISTS fts_sections USING fts5(
                     section_id UNINDEXED, relative_path, title, heading_path, aliases, tags, content
+                );
+
+                CREATE TABLE IF NOT EXISTS note_toc (
+                    toc_id TEXT PRIMARY KEY,
+                    note_id TEXT NOT NULL REFERENCES notes(note_id) ON DELETE CASCADE,
+                    relative_path TEXT NOT NULL,
+                    heading_level INTEGER NOT NULL,
+                    heading_text TEXT NOT NULL,
+                    heading_path_json TEXT NOT NULL,
+                    parent_toc_id TEXT REFERENCES note_toc(toc_id) ON DELETE CASCADE,
+                    ordinal INTEGER NOT NULL,
+                    start_offset INTEGER NOT NULL,
+                    end_offset INTEGER NOT NULL,
+                    section_id TEXT REFERENCES sections(section_id) ON DELETE SET NULL,
+                    UNIQUE(note_id, ordinal)
+                );
+                CREATE INDEX IF NOT EXISTS note_toc_note_idx ON note_toc(note_id, ordinal);
+                CREATE INDEX IF NOT EXISTS note_toc_path_idx ON note_toc(relative_path);
+                CREATE INDEX IF NOT EXISTS note_toc_parent_idx ON note_toc(parent_toc_id);
+
+                CREATE VIRTUAL TABLE IF NOT EXISTS fts_toc USING fts5(
+                    toc_id UNINDEXED, note_id UNINDEXED, section_id UNINDEXED, relative_path, title, heading_text, heading_path
                 );
 
                 CREATE TABLE IF NOT EXISTS section_embeddings (
