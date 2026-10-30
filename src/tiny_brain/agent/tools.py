@@ -24,6 +24,7 @@ class ReadTools:
         self._handlers: dict[str, Callable[..., dict[str, Any]]] = {
             "search_notes": self.search_notes,
             "read_note": self.read_note,
+            "get_note_outline": self.get_note_outline,
             "find_backlinks": self.find_backlinks,
             "find_related_notes": self.find_related_notes,
             "find_notes_by_tag": self.find_notes_by_tag,
@@ -60,6 +61,44 @@ class ReadTools:
         if len(content) > 2_000_000:
             raise ToolError("Note exceeds maximum read limit (2MB)")
         return {"path": path, "content": content}
+
+    def get_note_outline(self, path: str) -> dict[str, Any]:
+        try:
+            candidate = path if path.lower().endswith(".md") else f"{path}.md"
+            safe_file = resolve_vault_path(self.vault_root, candidate)
+            safe_rel = safe_file.relative_to(self.vault_root.resolve()).as_posix()
+        except UnsafePath as exc:
+            raise ToolError(f"Unsafe note path '{path}': paths must be relative and stay within vault") from exc
+
+        row = self.connection.execute(
+            """SELECT note_id, title, relative_path FROM notes
+               WHERE lower(relative_path) IN (lower(?), lower(?))""",
+            (safe_rel, safe_rel.removesuffix(".md")),
+        ).fetchone()
+        if not row:
+            if not safe_file.exists():
+                raise ToolError(f"Note '{path}' was not found in vault. Use search_notes to locate existing notes.")
+            raise ToolError(f"Note '{path}' has not been indexed yet.")
+        note_id, title, relative_path = row[0], row[1], row[2]
+        toc_rows = self.connection.execute(
+            """SELECT heading_level, heading_text, heading_path_json, section_id
+               FROM note_toc WHERE note_id = ? ORDER BY ordinal""",
+            (note_id,),
+        ).fetchall()
+        outline = [
+            {
+                "level": r[0],
+                "heading": r[1],
+                "heading_path": " > ".join(json.loads(r[2])),
+                "section_id": r[3],
+            }
+            for r in toc_rows
+        ]
+        return {
+            "path": relative_path,
+            "title": title,
+            "outline": outline,
+        }
 
     def find_backlinks(self, path: str, limit: int = 20) -> dict[str, Any]:
         safe_path = _safe_note_path(path)
@@ -99,6 +138,7 @@ class ReadTools:
 
 def _safe_note_path(path: str) -> str:
     try:
-        return resolve_vault_path(Path("."), path).relative_to(Path(".")).as_posix()
+        root = Path(".").resolve()
+        return resolve_vault_path(root, path).relative_to(root).as_posix()
     except (UnsafePath, ValueError) as exc:
         raise ToolError("unsafe note path") from exc
